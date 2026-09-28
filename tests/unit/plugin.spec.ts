@@ -340,8 +340,6 @@ describe('WorkBuddy provider 注册', () => {
     expect(ctx.settings.registeredNamespaces).toContain('llm-lobsterai')
     expect(ctx.settings.registeredNamespaces).toContain('llm-qoder')
     expect(ctx.settings.registeredNamespaces).toContain('llm-trae')
-    // Antigravity 复用本机 IDE 凭据，同样需要自己的 namespace
-    expect(ctx.settings.registeredNamespaces).toContain('llm-antigravity')
   })
 
   it('不注册任何 provider 的斜杠命令（入口都在 Jet Hub 设置页）', () => {

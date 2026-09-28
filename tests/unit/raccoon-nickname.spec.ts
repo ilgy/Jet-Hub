@@ -16,16 +16,16 @@ import { buildRaccoonNickname } from '../../src/jet-hub-rpc.js'
 describe('buildRaccoonNickname', () => {
   it('昵称 + 手机号尾号（典型情形）', () => {
     expect(buildRaccoonNickname(
-      { nickname: 'RaccoonAva', phone: '18611406665', user_id: '7445120' },
+      { nickname: 'RaccoonAva', phone: '13800006665', user_id: '1000001' },
       'RACCOON_ACCOUNT_ABD05EAC',
     )).toBe('RaccoonAva (6665)')
   })
 
   it('无手机号时退化为用户 id', () => {
     expect(buildRaccoonNickname(
-      { nickname: 'RaccoonAva', user_id: '7445120' },
+      { nickname: 'RaccoonAva', user_id: '1000001' },
       'fallback',
-    )).toBe('RaccoonAva (7445120)')
+    )).toBe('RaccoonAva (1000001)')
   })
 
   it('只有昵称时原样返回（不产出孤立括号）', () => {
@@ -34,13 +34,13 @@ describe('buildRaccoonNickname', () => {
 
   it('无昵称但有手机号时用 `Raccoon 尾号`（照 Loomy 形态）', () => {
     expect(buildRaccoonNickname(
-      { phone: '18611406665', user_id: '7445120' },
+      { phone: '13800006665', user_id: '1000001' },
       'fallback',
     )).toBe('Raccoon 6665')
   })
 
   it('只有用户 id 时用它作后缀', () => {
-    expect(buildRaccoonNickname({ user_id: '7445120' }, 'fallback')).toBe('Raccoon 7445120')
+    expect(buildRaccoonNickname({ user_id: '1000001' }, 'fallback')).toBe('Raccoon 1000001')
   })
 
   it('全都没有时回退到账号 id（不产出空名）', () => {
@@ -54,21 +54,21 @@ describe('buildRaccoonNickname', () => {
   it('昵称里已含该尾号时不重复追加', () => {
     // 服务端将来若把手机号尾号写进 name，不应产出 `X6665 (6665)`
     expect(buildRaccoonNickname(
-      { nickname: 'Raccoon6665', phone: '18611406665' },
+      { nickname: 'Raccoon6665', phone: '13800006665' },
       'fb',
     )).toBe('Raccoon6665')
   })
 
   it('空白昵称视为无昵称（不产出 ` (6665)` 这种前导空格）', () => {
     expect(buildRaccoonNickname(
-      { nickname: '   ', phone: '18611406665' },
+      { nickname: '   ', phone: '13800006665' },
       'fb',
     )).toBe('Raccoon 6665')
   })
 
   it('只取手机号后 4 位（不完整暴露号码）', () => {
-    const name = buildRaccoonNickname({ nickname: 'N', phone: '18611406665' }, 'fb')
-    expect(name).not.toContain('18611406665')
+    const name = buildRaccoonNickname({ nickname: 'N', phone: '13800006665' }, 'fb')
+    expect(name).not.toContain('13800006665')
     expect(name).toContain('(6665)')
     expect(name).toBe('N (6665)')
   })

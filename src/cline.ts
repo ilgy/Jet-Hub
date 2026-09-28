@@ -37,10 +37,10 @@ export interface ClineCredential {
   /** 访问令牌过期时间（毫秒时间戳）。 */
   expire_time?: number
   /**
-   * Cline 账号 id（形如 `usr-01M3BCV4FYCGJKAWD3MJG3DBQM`）。
+   * Cline 账号 id（形如 `usr-01EXAMPLE0000000000000000`）。
    *
    * ⚠️ **余额端点必须用它**，不能用 JWT 的 `sub`
-   * （`user_01M3BCQ86DV4S9KKBT85X4GKTV`）：实测传 `sub` 返回
+   * （`user_01EXAMPLE0000000000000000`）：实测传 `sub` 返回
    * `400 {"error":"Invalid request format"}`。
    */
   account_id?: string

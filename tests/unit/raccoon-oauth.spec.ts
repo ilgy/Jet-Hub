@@ -220,12 +220,12 @@ describe('fetchRaccoonUserInfo', () => {
   it('取出用户 id、昵称与身份', async () => {
     const fetcher = vi.fn(async () => jsonResponse({
       code: 0,
-      data: { id: '7445120', name: 'RaccoonAva', office_identity: 'personal' },
+      data: { id: '1000001', name: 'RaccoonAva', office_identity: 'personal' },
     }))
     const info = await fetchRaccoonUserInfo(
       RACCOON, { access_token: 't', refresh_token: 'r' }, fetcher as unknown as typeof fetch,
     )
-    expect(info.userId).toBe('7445120')
+    expect(info.userId).toBe('1000001')
     expect(info.nickname).toBe('RaccoonAva')
     expect(info.officeIdentity).toBe('personal')
   })

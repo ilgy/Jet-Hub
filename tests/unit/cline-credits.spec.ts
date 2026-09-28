@@ -10,15 +10,15 @@ import type { ClineCredential } from '../../src/cline.js'
 
 /** 实测的余额响应（2026-09-25）。 */
 const BALANCE_FIXTURE = {
-  data: { userId: 'usr-01M3BCV4FYCGJKAWD3MJG3DBQM', balance: 500000 },
+  data: { userId: 'usr-01EXAMPLE0000000000000000', balance: 500000 },
   success: true,
 }
 
 const CRED: ClineCredential = {
   access_token: 'workos:eyJhbGciOiJSUzI1NiIs',
-  refresh_token: 'tmgEeM2rd9ybYoWpXl8JqUfvK',
-  account_id: 'usr-01M3BCV4FYCGJKAWD3MJG3DBQM',
-  email: 'ijetlee@163.com',
+  refresh_token: 'mock_refresh_token_example_123',
+  account_id: 'usr-01EXAMPLE0000000000000000',
+  email: 'user@example.com',
 }
 
 describe('parseClineBalanceResponse', () => {
@@ -83,7 +83,7 @@ describe('fetchClineCreditBalance', () => {
 
     const result = await fetchClineCreditBalance(CRED, CLINE, fetcher)
     expect(calls[0]).toBe(
-      'https://api.cline.bot/api/v1/users/usr-01M3BCV4FYCGJKAWD3MJG3DBQM/balance',
+      'https://api.cline.bot/api/v1/users/usr-01EXAMPLE0000000000000000/balance',
     )
     expect(result.rawBalance).toBe(500000)
     expect(result.balance?.total).toBe(5)

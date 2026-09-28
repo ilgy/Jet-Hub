@@ -21,7 +21,7 @@
  * 全部来自本机 Qoder 0.3.4 产物逆向 + 实测，详见
  * `docs/superpowers/specs/2026-09-19-qoder-provider-design.md` §2。
  * 逆向目标：
- * - `C:\Users\Jet\AppData\Local\Programs\Qoder\resources\app.asar`
+ * - `%LOCALAPPDATA%\Programs\Qoder\resources\app.asar`
  * - `...\@qoder-ai\qoder-agent-sdk\dist\_worker\qoder-worker-runtime.obf.mjs`
  *   （字符串经 `_$d = base64 → XOR("tqrRVttEZQ4G")` 编码）
  */

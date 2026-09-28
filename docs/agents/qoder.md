@@ -71,8 +71,6 @@ POST {openApiBase}/sash/api/v1/me/campaigns/{campaignId}/claim   ← body **空*
 
 Jet Hub 设置页（`plugin-src/client/jet-hub.js`）提供多账号管理与限流自动切换；「一键领取积分」按钮（每日签到）**CodeBuddy、LobsterAI、CodeArts、Qoder 与 TRAE 五个面板提供** —— 只有国际版 WorkBuddy 不提供（其后端没有签到接口）。五者是**五套互不相同的协议**（见下「积分领取」）。
 
-插件另提供 `antigravity`（Google Antigravity IDE）路由，走**路径 A：本机凭据复用**——只读复用 IDE 自身的 OAuth 登录态，不独立登录、不进账号池。硬性约束见下文「Antigravity 渠道的硬性约束」。
-
 - **包名**：`dsh-codearts-auth`
 - **入口**：`lib/index.js`（宿主侧）、`lib/client/jet-hub.js`（客户端 bundle）
 - **构建**：`pnpm build:all`（`tsc` 编译宿主侧 + `esbuild` 打包客户端）

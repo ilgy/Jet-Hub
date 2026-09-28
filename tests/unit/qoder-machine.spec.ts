@@ -17,7 +17,7 @@
  * `runtime-info.exe` 的陈旧缓存（实测停在 179 天前，且**跑 exe 也不更新**）。
  * native 的真实做法是**每次按需 spawn** `runtime-info.exe --account-stdin`。
  * 实测对照（第二个账号）：
- *   - 磁盘缓存（`f677427e14…`）→ `claimable:false`，仅 1 条 `VIEW_DETAILS`
+ *   - 磁盘缓存（`mock_type…`）→ `claimable:false`，仅 1 条 `VIEW_DETAILS`
  *   - 实时生成（`15e6683914…`）→ `claimable:true`，含 `CLAIM_BENEFIT/CLAIMABLE/100`
  *
  * ⚠️ 本文件**不得真的 spawn 开发机上的 `runtime-info.exe`**：那会让用例
@@ -38,8 +38,8 @@ import {
   runtimeInfoArgs,
 } from '../../src/qoder-machine.js'
 
-/** 真实的 `machine_token.json` 形状（取自开发机，token 已截断）。 */
-const REAL = { token: 'P1gAqPZCWUi74rLzCPRlKoCcii6MYvi3', type: 'f677427e14abd0f6c1', updateAt: 1774862945355 }
+/** 样例 `machine_token.json` 形状（模拟开发机结构）。 */
+const REAL = { token: 'mock_token_example_1234567890abcdef', type: 'mock_type_example_f677427e14', updateAt: 1774862945355 }
 
 let dir: string
 let file: string

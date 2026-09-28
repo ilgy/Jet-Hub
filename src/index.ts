@@ -6,10 +6,6 @@ import { registerBuddyLlm } from './buddy-adapter.js'
 import { registerLobsteraiLlm } from './lobsterai-adapter.js'
 import { registerQoderLlm } from './qoder-adapter.js'
 import { registerTraeLlm } from './trae-adapter.js'
-// Antigravity（Google）：走独立的本地私有通道 / 公共 API 降级路径。
-// ⚠️ 刻意**不放进 ALL_PRODUCTS**，也不接入账号池，原因见下方注册处注释。
-import { registerAntigravityLocalLlm, getRegisteredAntigravityAdapter, ANTIGRAVITY_PROVIDER } from './antigravity-local-adapter.js'
-import { readAntigravityCredential } from './antigravity.js'
 import { registerClineLlm } from './cline-adapter.js'
 import { registerLoomyLlm, parseLoomyRemoteModels } from './loomy-adapter.js'
 import { registerRaccoonLlm } from './raccoon-adapter.js'
@@ -157,7 +153,6 @@ export function apply(ctx: Context): void {
     'llm-codearts', 'llm-lobsterai',
     'llm-qoder', 'llm-qoder-cn', 'llm-trae', 'llm-trae-intl',
     'llm-cline', 'llm-loomy', 'llm-raccoon',
-    `llm-${ANTIGRAVITY_PROVIDER}`,
   )
   const service = new CodeArtsAuth(ctx)
   const pool = new AccountPool(ctx)
@@ -802,12 +797,9 @@ export function apply(ctx: Context): void {
       await loomy.refreshAll(pool)
     } catch { /* 静默 */ }
     try {
-      // raccoon **可续期**：只按 refreshable 过滤，且只续期已过期的账号。
-      await raccoon.refreshAll(pool)
+    // raccoon **可续期**：只按 refreshable 过滤，且只续期已过期的账号。
+    await raccoon.refreshAll(pool)
     } catch { /* 静默 */ }
-    // ⚠️ Antigravity **刻意不在此列**：它不接账号池、不做限流轮换，续期由 IDE
-    // 自己负责（见下方注册处注释）。把它并进 refreshAll 会引入 Google 侧敏感的
-    // 多客户端轮换行为。
   }
 
   // 启动时如果有任何可续期账号，安排定期续期。
@@ -878,29 +870,6 @@ export function apply(ctx: Context): void {
   // settingsNs 在各自的 registerXxxLlm 里一次性注册，不再随账号池变化增删。
 
   // ===== Jet Hub RPC 注册 =====
-  // ===== Antigravity (Google) 注册 =====
-  //
-  // ⚠️ 刻意**不放进 ALL_PRODUCTS**，也不传入 accountPool。
-  //
-  // 原因（防封号的关键架构决策）：ALL_PRODUCTS 会被上面的循环用于创建
-  // 多账号服务实例，并接入 refreshAll / 限流自动切换。Google 侧对"同一账号
-  // 被多客户端高频轮换调用"的判定远比腾讯侧严格，账号池那套做法套过来等同
-  // 于账号滥用。Antigravity 因此走单账号、无池、纯复用的独立注册路径。
-  //
-  // **通道选择（方案 B 为主）**：
-  //   - 首选本地私有通道：借用 IDE 自己的 language_server 进程发请求，
-  //     对 Google 而言与"用户在 IDE 里正常提问"无法区分（见 antigravity-local.ts）。
-  //     这条路**不读凭据文件**，账号身份由 IDE 运行时决定。
-  //   - 降级公共 API：仅在显式开启 `allowPublicFallback` 且 IDE 未运行时使用
-  //     （见 antigravity-adapter.ts）。本机实测该账号的公共 API 全部 403
-  //     SUBSCRIPTION_REQUIRED，故默认关闭，改为给出"请先打开 IDE"的中文提示。
-  const disposeAntigravity = registerAntigravityLocalLlm(ctx, {
-    skipConfigurableRegistration: true,
-  })
-  // ⚠️ `registerAntigravityLocalLlm` 返回的是**注销函数**（`() => void`），
-  // 不是适配器实例 —— 实例由模块内的 `setRegisteredAntigravityAdapter` 持有，
-  // 只能经 `getRegisteredAntigravityAdapter()` 取回。别把返回值当适配器用。
-  ctx.effect(() => disposeAntigravity)
 
   // provider → 适配器实例：Jet Hub「显示列表」需要 `listAllModels()`（不受用户
   // 黑名单影响的全量目录，带最终展示名/倍率）。DSH 的 `ctx.llm` 只保证
@@ -921,13 +890,6 @@ export function apply(ctx: Context): void {
     cline: clineAdapter,
     loomy: loomyAdapter,
     raccoon: raccoonAdapter,
-  }
-  // Antigravity 的适配器实例只在它已注册时登记。`getRegisteredAntigravityAdapter()`
-  // 类型上是可选的（注册函数返回的是注销函数而非实例），故此处按需取值，
-  // 避免把 `undefined` 塞进 `modelAdapters` 而破坏其类型契约。
-  const antigravityAdapter = getRegisteredAntigravityAdapter()
-  if (antigravityAdapter !== undefined) {
-    modelAdapters[ANTIGRAVITY_PROVIDER] = antigravityAdapter
   }
 
   registerJetHubRpc(

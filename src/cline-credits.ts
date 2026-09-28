@@ -8,12 +8,12 @@
  * Authorization: Bearer workos:<jwt>       ← ⚠️ 前缀必须保留
  * HTTP-Referer / X-Title / X-IS-MULTIROOT / X-CLIENT-TYPE
  *
- * → { "data": { "userId": "usr-01M3BCV4FYCGJKAWD3MJG3DBQM", "balance": 500000 },
+ * → { "data": { "userId": "usr-01EXAMPLE0000000000000000", "balance": 500000 },
  *     "success": true }
  * ```
  *
  * ⚠️ **`userId` 用凭据里的 `account_id`，不是 JWT 的 `sub`**：
- * 实测传 `sub`（`user_01M3BCQ86DV4S9KKBT85X4GKTV`）返回
+ * 实测传 `sub`（`user_01EXAMPLE0000000000000000`）返回
  * `400 {"error":"Invalid request format"}`。两者形态完全不同
  * （`usr-…` vs `user_…`），极易混用。
  *

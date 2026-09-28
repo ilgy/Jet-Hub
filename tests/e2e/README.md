@@ -12,7 +12,6 @@
 | `buddy-pool-probe.e2e.spec.ts` | `DSH_BUDDY_POOL_E2E=1` + `DSH_BUDDY_POOL_E2E_CONFIRM=yes` | 用账号池凭据走完整 LLM 链路 |
 | `buddy-ratelimit-probe.e2e.spec.ts` | `DSH_BUDDY_RATELIMIT_E2E=1` + `DSH_BUDDY_RATELIMIT_E2E_CONFIRM=yes` | 对记录「限额重置」的账号实发一次请求，**判定是否真限流** |
 | `trae-channels-probe.e2e.spec.ts` | `DSH_TRAE_E2E=1` | 拉真实多通道目录，并用**真实适配器**对 `glm-5.1`（agent 通道）与 `glm-5-turbo`（work 通道）各发一条最短消息 —— **验证「模型只在列出它的通道里可调用」**。消耗 2 次极小额度 |
-| `antigravity-local.e2e.spec.ts` | `DSH_ANTIGRAVITY_E2E=1` + `DSH_ANTIGRAVITY_E2E_CONFIRM=yes` | 走 IDE 本地私有通道发一条真实消息并取回回复。请求由 IDE 自己发出，但**确实计费**，故默认不执行 |
 | `cline-chat-probe.e2e.spec.ts` | `DSH_CLINE_CHAT_E2E=1` + `DSH_CLINE_CHAT_E2E_CONFIRM=yes` | **默认只请求 `cline-free/deepseek-v4.1-flash`**（用户指定的日常验证模型）。其余 4 个免费模型需 `DSH_CLINE_CHAT_E2E_ALL_FREE=1` 才遍历。**付费模型一律拒绝请求**（见下「Cline 探针的付费保护」） |
 
 > LobsterAI **没有**发 chat 请求的 e2e —— 它的对话链路可在 Jet Hub 里人工验证
@@ -29,8 +28,6 @@
 | `login.e2e.spec.ts` | `DSH_CODEARTS_E2E=1` | 只走 CodeArts 浏览器登录与凭据换取 |
 | `buddy-login-probe.e2e.spec.ts` | `DSH_BUDDY_PROBE=1` | 只打印登录流程原始响应，不发模型请求 |
 | `workbuddy-claim-probe.e2e.spec.ts` | `DSH_WORKBUDDY_CLAIM_E2E=1` + `DSH_WORKBUDDY_CLAIM_E2E_CONFIRM=yes` | 真实领取积分（不改模型额度，但会改动账号当日签到状态） |
-| `antigravity.e2e.spec.ts` | `DSH_ANTIGRAVITY_E2E=1`（只读）<br>`+ DSH_ANTIGRAVITY_E2E_CONFIRM=yes`（发出站请求） | 读本机 IDE 凭据 → 官方客户端续期 → `loadCodeAssist` 认证。**两级闸门**：默认只跑只读用例（零网络） |
-| `antigravity-local.e2e.spec.ts` | `DSH_ANTIGRAVITY_E2E=1`（只读）<br>`+ DSH_ANTIGRAVITY_E2E_CONFIRM=yes`（消耗配额） | 发现 language_server → 拉模型清单 → 建会话。**第一级全部打向 `127.0.0.1`，零出站流量**；只有第二级才真实推理 |
 | `lobsterai-probe.e2e.spec.ts` | `DSH_LOBSTERAI_E2E=1` | **只读**：凭据结构、客户端版本号动态解析、签到槽位/上下文、积分余额。**不签到、不发模型请求** |
 | `lobsterai-claim-probe.e2e.spec.ts` | `DSH_LOBSTERAI_E2E=1` + `DSH_LOBSTERAI_CLAIM_E2E_CONFIRM=yes` | 真实签到（会改动当日签到状态；**不消耗模型积分**，且重复运行幂等） |
 | `codearts-credits-probe.e2e.spec.ts` | `DSH_CODEARTS_E2E=1` | **只读**：凭据结构、**账户类型检测**（`is_credit_package`）、积分余额、活动列表。**绝不领取** |
@@ -67,21 +64,6 @@ pnpm test:e2e:codearts
 
 # ⚠️ 会真实领取积分（改动当日签到状态）
 pnpm test:e2e:workbuddy-claim
-
-# Antigravity：复用本机 IDE 凭据做认证链路验证
-# 前提：本机已安装 Antigravity IDE 且已完成 Google 账号登录
-pnpm test:e2e:antigravity          # 只读：读凭据 + 解析校验（零网络）
-pnpm test:e2e:antigravity:full     # 追加：token 续期 + Cloud Code 端点调用
-
-# Antigravity：本地私有通道（方案 B，**当前主用通道**）
-# 前提：Antigravity IDE 必须正在运行
-pnpm test:e2e:antigravity-local      # 只读：发现进程 + 模型清单 + 建会话（全打 127.0.0.1，零出站）
-pnpm test:e2e:antigravity-local:full # ⚠️ 追加：真实发一条消息（消耗账号配额）
-
-> **两条 Antigravity 测试的区别**：`antigravity` 系列验证**方案 A**（插件直连
-> Google 公共 API，本机实测 403 `SUBSCRIPTION_REQUIRED`）；`antigravity-local`
-> 系列验证**方案 B**（借用 IDE 自己的 language_server 发请求，实测可用）。
-> 插件运行时默认走 B，A 仅作可选降级。
 
 # 安全：LobsterAI 只读探针（凭据/版本号/签到槽位/余额，不签到）
 pnpm test:e2e:lobsterai

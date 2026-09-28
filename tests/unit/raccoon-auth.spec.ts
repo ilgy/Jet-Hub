@@ -48,7 +48,8 @@ function makeCtx(): { ctx: Context; credentials: FakeCredentials; warnings: stri
 }
 
 function newService(ctx: Context, options: { fetcher?: typeof fetch } = {}): RaccoonAuth {
-  const service = new RaccoonAuth(ctx, options)
+  const fetcher = options.fetcher ?? (vi.fn(async () => jsonResponse({ code: 0, data: {} })) as unknown as typeof fetch)
+  const service = new RaccoonAuth(ctx, { ...options, fetcher })
   services.push(service)
   return service
 }

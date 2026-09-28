@@ -21,7 +21,6 @@
 | [`docs/agents/trae.md`](docs/agents/trae.md) | TRAE 四条协议的坑、通道路由、推理档位、Max 模式、图片判定 | 改 `src/trae*.ts` |
 | [`docs/agents/pricing.md`](docs/agents/pricing.md) | 计费倍率解析差异、`maxOutputTokens` 下发、同名消歧、X-Domain | 改展示名 / 请求头 / 输出上限 |
 | [`docs/agents/credits.md`](docs/agents/credits.md) | 五个 provider 的签到协议、幂等判据、能力矩阵门控 | 改 `src/*-credits.ts` / `credits-capabilities.js` |
-| [`docs/agents/antigravity.md`](docs/agents/antigravity.md) | 两条通道选路、八条防封号硬性约束、协议字段位置 | 改 `src/antigravity*.ts` |
 | [`docs/agents/catalog-gating.md`](docs/agents/catalog-gating.md) | 模型黑名单、账号门控、`listAllModels` 契约、两步式登录 | 改 `listModels` / `model.list` RPC |
 | [`docs/agents/qoder.md`](docs/agents/qoder.md) | Qoder 积分端点实测、幂等判据、`openai-compat.ts` 边界 | 改 `src/qoder*.ts` / `openai-compat.ts` |
 
@@ -29,7 +28,7 @@
 
 ## 项目概述
 
-本项目是 DeepSeek Harness 的一个插件（`dsh-codearts-auth`），提供华为云 CodeArts 浏览器登录与凭据管理功能。插件演进涵盖了七个 LLM provider 路由核心骨架及其区域版本，全量支持 **14 个 provider**，分属 8 套互不相同的协议族：
+本项目是 DeepSeek Harness 的一个插件（`dsh-codearts-auth`），提供华为云 CodeArts 浏览器登录与凭据管理功能。插件演进涵盖了七个 LLM provider 路由核心骨架及其区域版本，全量支持 **13 个 provider**，分属 7 套互不相同的协议族：
 
 | 协议族 | provider | 特点 |
 |---|---|---|
@@ -38,7 +37,6 @@
 | 阿里 Qoder | `qoder` / `qoder-cn` | PKCE 设备码轮询 + **加密推理端点**（WASM 签名） |
 | 字节 TRAE | `trae` / `trae-intl` | ExchangeToken 轮换 + 载荷双向转换（OpenAI ↔ SOLO） |
 | 华为 CodeArts | `codearts` | `SDK-HMAC-SHA256` 签名 |
-| Google Antigravity | `antigravity` | 本机凭据复用，**不进账号池** |
 | Cline | `cline` | WorkOS 设备码轮询 + 免费模型识别 + 5 档思考强度 |
 | 讯飞 Loomy | `loomy` | 微信扫码 + 手机号/短信登录 + 智能余额选号 |
 | 商汤小浣熊 | `raccoon` | 二维码扫码/手机验证码 + AES-128 加密 + 积分签到 |
@@ -311,41 +309,6 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 为 false 时**不得**发起对应请求，也不应渲染相关 UI。
 ⚠️ 该表必须与 `PROVIDERS` 列表**等集**（由单测断言）。
 
-### Antigravity 渠道硬性约束（防封号）
-📖 [antigravity 分册](docs/agents/antigravity.md)
-
-**八条不可破坏的约束**（架构决策，非风格偏好）：
-
-1. **不得加入 `ALL_PRODUCTS`** —— 该数组会用于创建多账号实例并接入 `refreshAll` /
-   限流轮换，而 Google 侧对「同一账号被多客户端高频轮换」的判定远比腾讯侧严格。
-2. **不得给 `AntigravityAdapter` 传入 `accountPool`** —— 固定单账号、串行、限速
-   （两次请求间隔 ≥ 1s）。
-3. **`state.vscdb` 必须以 `readOnly: true` 打开** —— IDE 运行时该库处于 WAL 模式，
-   写入会争锁并可能损坏凭据。
-4. **不得伪造客户端身份标识** —— 不要复制 `buddy-adapter.ts` 的
-   `User-Agent: CodeBuddyIDE/...` 伪装做法；Google 侧对指纹不匹配极敏感。
-5. **续期默认交给 IDE** —— IDE 自行续期并写回；每次调用都重读凭据。
-6. **方案 B 不读 `state.vscdb`** —— 账号身份由 IDE 运行时决定。
-7. **方案 B 不发 `Authorization`** 与任何自定义业务头（本地 loopback 只需
-   `Content-Type` 与 `x-codeium-csrf-token`）。
-8. **CSRF token 不得落日志、不得持久化** —— 所有错误信息构造处都要经过 `redact()`。
-9. **发现流程不得硬编码端口** —— 端口与 token 随 IDE 重启变化，必须每次动态确认配对。
-
-**两个致命字段位置**（写错就完全不通）：
-- 鉴权头名是 **`x-codeium-csrf-token`**，不是 `x-csrf-token`。
-- 模型**必须**放在 `SendUserCascadeMessage.cascadeConfig.plannerConfig.planModel`，
-  取值是 `MODEL_PLACEHOLDER_*` **原样字符串**。放到 `StartCascade.requestedModel`
-  （那是枚举）或 `requestedModelId` 都会在执行时报错。
-- 回复**没有服务端流式**，只能轮询 `GetCascadeTrajectory`；模型文本在
-  `steps[].plannerResponse.modifiedResponse`（回退 `.response`）。
-
-**自适应选路**：本地通道可用就不探测公共 API（少一次出站即少一分指纹暴露）；
-本地不可用才降级。⚠️ 本地通道的判据是 **`Heartbeat` 通过**，不是「能拉到模型清单」
-（清单只是 advisory，当判据会让瞬时抖动误报为不可用）。
-
-⚠️ **不要**把 `generateContent` 的 403 当成「插件写错了」去改鉴权代码 ——
-本机实测该账号未开通对应公共 API（`loadCodeAssist` 返回 200 说明凭据本身有效）。
-
 ### TRAE 协议要点
 📖 [trae 分册](docs/agents/trae.md)（**必读**，36 KB 完整记录）
 
@@ -380,6 +343,28 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 `X-Domain` 头取**产品的 `apiDomain`**，不是凭据里的 domain。凭据可能来自旧版本产品，
 用错会把请求发到错误的区域端点。
+
+### GitHub 推送前敏感信息排查与自动清除铁律 (Pre-Push Sanitization)
+
+⚠️ **向 GitHub（`https://github.com/zhengwuji/Jet-Hub`）或任何公开仓库推送代码前，必须自动执行敏感信息扫描与清除，严禁真实数据入库**。
+
+1. **禁绝入库的敏感数据范围**：
+   - **真实个人手机号**：如 `1[3-9]\d{9}` 真实号码，严禁出现在测试用例、代码或注释中；必须使用合规虚构号码（如 `13800000000`、`13800006665` 等）替代。
+   - **真实个人邮箱与姓名**：严禁出现个人 163、QQ、Gmail 等真实邮箱；统一使用标准示例（如 `user@example.com`、`developer@example.com`、`Developer Example`）。
+   - **真实访问令牌与密钥**：真实 OAuth Token、Refresh Token、API Key、AK/SK 严禁入库；测试用例必须使用结构等价的 Mock 字符串（如 `mock_refresh_token_example_123`）。
+   - **真实账号 ID 与平台标识**：如 Cline `usr-xxx`、商汤小浣熊数字用户 ID 等真实用户标识，必须使用通用样例（如 `usr-01EXAMPLE0000000000000000`、`1000001`）替代。
+   - **开发机特定指纹与机器码**：开发机抓取的真实 machine token / 机器指纹必须使用虚拟占位符替代。
+   - **开发者本地系统绝对路径**：严禁出现 `C:\Users\<username>\...` 或 `F:\Users\<username>\...` 等带用户名的绝对路径；必须转换为环境变量（如 `%LOCALAPPDATA%\...`、`%USERPROFILE%\...`）或通用占位符。
+
+2. **脱敏替代的核心边界（严防破坏可用性）**：
+   - **公共逆向协议常量保留**：来自官方前端公开代码并用于接口签名的客户端公钥/公共 Secret（如 Loomy Web 端的 `accessKeyId/accessKeySecret`、小浣熊公用 AES 密钥 `senseraccoon2023`、Google 客户端内嵌 Client Secret）属于协议必需特征，**不得改动**，改动会导致生产功能瘫痪。
+   - **单测无缝兼容**：脱敏修改后，单测中的逻辑依赖（如按手机号尾号消歧、ID 格式校验、信封提取等）必须同步保持断言一致，且必须通过 `pnpm test` 验证。
+
+3. **推送自动化流水线拦截**：
+   - 提交/推送前执行自动化检测与清洗：
+     - 清洗命令：`pnpm sanitize`（自动识别并替换已知敏感特征）
+     - 校验命令：`pnpm check:secrets`（若存在未脱敏数据则退出码为 1 并拦截）
+   - Git Hook 集成：本地已部署 `.git/hooks/pre-push`，推送前自动运行 `check:secrets` 拦截违规提交。
 
 ---
 
@@ -426,14 +411,14 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 ## LLM Provider 约定
 
-- provider 名称（**11 个**）：`codearts` / `buddy` / `buddy-intl` / `workbuddy-cn` /
-  `workbuddy` / `lobsterai` / `qoder` / `qoder-cn` / `trae` / `trae-intl` / `antigravity`
+- provider 名称（**13 个**）：`codearts` / `buddy` / `buddy-intl` / `workbuddy-cn` /
+  `workbuddy` / `lobsterai` / `qoder` / `qoder-cn` / `trae` / `trae-intl` / `cline` /
+  `loomy` / `raccoon`
   - ⚠️ 必须与 `plugin-src/client/jet-hub.js` 的 `PROVIDERS` **完全一致**
 - 端点格式为 OpenAI 兼容
 - 请求签名/鉴权方式因 provider 而异：
   - `codearts`：华为云 `SDK-HMAC-SHA256` 签名
   - `buddy` / `workbuddy*`：Bearer access_token + 自定义头（`X-Product-Code` 随产品切换）
-  - `antigravity`：Bearer access_token（Google OAuth）+ Cloud Code 私有协议
   - `lobsterai`：Bearer + `X-LobsterAI-Client-*`（**无签名**）
   - `qoder`：推理请求头**由 WASM 生成**（含签名），**必须原样透传**；余额端点另走 `Bearer`
   - `trae`：`Cloud-IDE-JWT <token>` + 十余个 `X-*` 身份头（**无签名**）

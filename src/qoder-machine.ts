@@ -47,7 +47,7 @@
  * `%APPDATA%\Qoder\SharedClientCache\cache\machine_token.json`：
  *
  * ```json
- * { "token": "P1gA…", "type": "f677427e14abd0f6c1", "updateAt": 1774862945355 }
+ * { "token": "mock_token_example…", "type": "mock_type_example_f677427e14", "updateAt": 1774862945355 }
  * ```
  *
  * 即 `Cosy-MachineToken` = `token`，`Cosy-MachineType` = `type`。

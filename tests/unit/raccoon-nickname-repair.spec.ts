@@ -82,8 +82,8 @@ function userInfoFetcher(overrides: Record<string, unknown> = {}): typeof fetch 
     code: 0,
     data: {
       name: 'RaccoonAva',
-      id: '7445120',
-      phone: '18611406665',
+      id: '1000001',
+      phone: '13800006665',
       office_identity: '',
       ...overrides,
     },
@@ -100,7 +100,7 @@ describe('repairAccountNicknames', () => {
     const { ctx, credentials } = makeCtx()
     // 老凭据：有 nickname 但**没有 phone**（旧实现没提取它）
     credentials.store.set('RACCOON_ACCOUNT_ABD05EAC', JSON.stringify({
-      access_token: JWT, refresh_token: 'r', user_id: '7445120', nickname: 'RaccoonAva',
+      access_token: JWT, refresh_token: 'r', user_id: '1000001', nickname: 'RaccoonAva',
     }))
     const { pool, updates } = makePool([accountOf()])
     const auth = newService(ctx, userInfoFetcher())
@@ -112,14 +112,14 @@ describe('repairAccountNicknames', () => {
     expect(updates).toEqual([{ id: 'raccoon-b4c18de9', nickname: 'RaccoonAva (6665)' }])
     // 凭据被补上 phone
     const saved = JSON.parse(credentials.store.get('RACCOON_ACCOUNT_ABD05EAC') ?? '{}') as { phone?: string }
-    expect(saved.phone).toBe('18611406665')
+    expect(saved.phone).toBe('13800006665')
   })
 
   it('**幂等**：昵称已是目标形态时不重复写', async () => {
     const { ctx, credentials } = makeCtx()
     credentials.store.set('RACCOON_ACCOUNT_ABD05EAC', JSON.stringify({
-      access_token: JWT, refresh_token: 'r', user_id: '7445120',
-      nickname: 'RaccoonAva', phone: '18611406665',
+      access_token: JWT, refresh_token: 'r', user_id: '1000001',
+      nickname: 'RaccoonAva', phone: '13800006665',
     }))
     // 账号池里的昵称已是目标值
     const { pool, updates } = makePool([accountOf({ nickname: 'RaccoonAva (6665)' })])
@@ -133,7 +133,7 @@ describe('repairAccountNicknames', () => {
   it('凭据已有 phone 时不发 user_info 请求（省一次网络往返）', async () => {
     const { ctx, credentials } = makeCtx()
     credentials.store.set('RACCOON_ACCOUNT_ABD05EAC', JSON.stringify({
-      access_token: JWT, refresh_token: 'r', user_id: '7445120', phone: '18611406665',
+      access_token: JWT, refresh_token: 'r', user_id: '1000001', phone: '13800006665',
     }))
     const { pool } = makePool([accountOf()])
     const fetcher = vi.fn(async () => new Response('{}', { status: 200 })) as unknown as typeof fetch
@@ -146,7 +146,7 @@ describe('repairAccountNicknames', () => {
   it('user_info 失败时仍能修复（退化为用户 id 后缀）', async () => {
     const { ctx, credentials } = makeCtx()
     credentials.store.set('RACCOON_ACCOUNT_ABD05EAC', JSON.stringify({
-      access_token: JWT, refresh_token: 'r', user_id: '7445120', nickname: 'RaccoonAva',
+      access_token: JWT, refresh_token: 'r', user_id: '1000001', nickname: 'RaccoonAva',
     }))
     const { pool, updates } = makePool([accountOf()])
     const fetcher = vi.fn(async () => { throw new Error('network down') }) as unknown as typeof fetch
@@ -155,7 +155,7 @@ describe('repairAccountNicknames', () => {
     const repaired = await auth.repairAccountNicknames(pool, buildRaccoonNickname)
     expect(repaired).toEqual(['raccoon-b4c18de9'])
     // 无 phone → 用 user_id 作后缀
-    expect(updates[0]?.nickname).toBe('RaccoonAva (7445120)')
+    expect(updates[0]?.nickname).toBe('RaccoonAva (1000001)')
   })
 
   it('单个账号失败不影响其他账号', async () => {
@@ -196,13 +196,13 @@ describe('repairAccountNicknames', () => {
   it('不调用任何写端点（只读 user_info）', async () => {
     const { ctx, credentials } = makeCtx()
     credentials.store.set('RACCOON_ACCOUNT_ABD05EAC', JSON.stringify({
-      access_token: JWT, refresh_token: 'r', user_id: '7445120', nickname: 'RaccoonAva',
+      access_token: JWT, refresh_token: 'r', user_id: '1000001', nickname: 'RaccoonAva',
     }))
     const calls: string[] = []
     const fetcher = vi.fn(async (url: string) => {
       calls.push(String(url))
       return new Response(JSON.stringify({
-        code: 0, data: { name: 'RaccoonAva', id: '7445120', phone: '18611406665' },
+        code: 0, data: { name: 'RaccoonAva', id: '1000001', phone: '13800006665' },
       }), { status: 200 })
     }) as unknown as typeof fetch
     const { pool } = makePool([accountOf()])

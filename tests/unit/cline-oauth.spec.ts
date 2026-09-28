@@ -31,12 +31,12 @@ function registerResponse(): Response {
     success: true,
     data: {
       accessToken: 'workos:eyJhbGciOiJSUzI1NiIs',
-      refreshToken: 'tmgEeM2rd9ybYoWpXl8JqUfvK',
+      refreshToken: 'mock_refresh_token_example_123',
       expiresAt: '2026-09-25T05:23:47.000Z',
       tokenType: 'Bearer',
       userInfo: {
-        clineUserId: 'usr-01M3BCV4FYCGJKAWD3MJG3DBQM',
-        email: 'ijetlee@163.com',
+        clineUserId: 'usr-01EXAMPLE0000000000000000',
+        email: 'user@example.com',
         firstName: '',
         lastName: '',
       },

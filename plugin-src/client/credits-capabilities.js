@@ -81,11 +81,6 @@ export const CREDITS_CAPABILITIES = Object.freeze({
   trae: Object.freeze({ balance: true, dailyCheckin: true }),
   // TRAE 国际版：同一套签到协议，端点走 trae.ai 系。
   'trae-intl': Object.freeze({ balance: true, dailyCheckin: true }),
-  // Antigravity：**两项都没有**。它复用本机 IDE 的登录态，没有独立的积分
-  // 账户体系，也不参与签到。显式登记为全 false 而非省略 —— 单测要求本表与
-  // PROVIDERS 同步（漏登记会静默失去能力，多登记则是死配置），且显式 false
-  // 让「这个 provider 确实不支持」这件事在代码里可见，而不是看起来像忘了写。
-  antigravity: Object.freeze({ balance: false, dailyCheckin: false }),
   // Cline：**只有余额**，没有签到。
   cline: Object.freeze({ balance: true, dailyCheckin: false }),
   // Loomy（讯飞）：三项能力齐全，且是**唯一**有第三项（新手任务）的渠道。

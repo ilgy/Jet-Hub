@@ -6,7 +6,7 @@
 
 **Jet Hub** 是专为 **DeepSeek Harness (DSH Desktop)** 深度定制的第三方多模型渠道凭据托管与统一接入网关插件。
 
-它支持将 **华为云 CodeArts**、**腾讯 CodeBuddy（国内版/国际版）**、**腾讯 WorkBuddy（国内版/国际版）**、**Google Antigravity（本地私有直连）**、**有道 LobsterAI（龙虾）**、**阿里系 Qoder** 以及 **字节跳动 TRAE** 等平台的 AI 模型无缝接入 DSH 环境中，提供现代化的图形管理面板、多账号池智能轮换、每日签到积分自动领取、后台静默自动续期、以及与 DSH 模型目录的动态联动管理。
+它支持将 **华为云 CodeArts**、**腾讯 CodeBuddy（国内版/国际版）**、**腾讯 WorkBuddy（国内版/国际版）**、**有道 LobsterAI（龙虾）**、**阿里系 Qoder** 以及 **字节跳动 TRAE** 等平台的 AI 模型无缝接入 DSH 环境中，提供现代化的图形管理面板、多账号池智能轮换、每日签到积分自动领取、后台静默自动续期、以及与 DSH 模型目录的动态联动管理。
 
 此外插件内置以下 provider 路由：
 
@@ -28,11 +28,8 @@
   支持微信扫码登录、积分余额、每日额度签到与新手任务 10000 积分。
 - **raccoon（商汤小浣熊 Raccoon Work）** — 见 [Raccoon provider](#raccoon-provider)；
   支持扫码/短信登录、6 个商汤日日新模型、积分与一次性登录奖励。
-- **antigravity（Google Antigravity IDE）** — 见
-  [Antigravity 渠道](#antigravity-渠道google-antigravity-ide)；
-  走**本机凭据复用 / 本地私有通道**，不独立登录、不进账号池。
 
-> **国内版与国际版各占一个 provider**（共 14 个）。两侧端点与登录态
+> **国内版与国际版各占一个 provider**（共 13 个）。两侧端点与登录态
 > **互不相通**，因此凭据也各自独立保存，绝不串用 —— 在对应面板登录哪一侧的账号，
 > 就只走那一侧的端点。
 
@@ -63,7 +60,24 @@
 
 ## ✨ 更新日志
 
-### v0.4.0 (最新发布)
+### v0.4.1 (最新发布)
+
+- 🗑️ **移除 Antigravity (Google) 渠道与架构收敛**：
+  - 移除 `antigravity` provider 及其本地私有通道 / 公共 API 适配层（`src/antigravity*.ts`）、控制面板组件、通道探测 RPC（`antigravity.channelProbe`）与全部 E2E 测试探针；
+  - 正式支持矩阵收敛为 **13 个生产级 Provider**（腾讯系 4 + LobsterAI + Qoder 2 + TRAE 2 + CodeArts + Cline + Loomy + Raccoon），其余各渠道功能及账号池完全不受影响。
+- 🔒 **全域敏感信息安全脱敏与流水线拦截 (Pre-Push Sanitization)**：
+  - 新增全自动敏感数据扫描与清洗脚本（`scripts/sanitize-secrets.mjs` 与 `scripts/pre-push`）；
+  - 全量清洗测试用例、代码与文档中的示例手机号、私有邮箱、Token 样例、本地系统绝对路径（如替换为 `%LOCALAPPDATA%`）及账号 ID，实现向公开/远程仓库推送的零泄密安全保障。
+- 🚀 **自动化部署脚本升级 (`deploy.ps1`)**：
+  - 重构并推出通用的 DSH Desktop 运行时安全部署脚本 `deploy.ps1`，提供自动备份、先删后拷切断硬链接、废弃旧产物深度清理、300+ 文件逐一 SHA256 哈希比对与 Node 语法自检；
+  - 保持 `deploy-antigravity.ps1` 兼容转发别名。
+- 🎨 **前端控制台健壮性与排版优化**：
+  - 优化 Jet Hub 控制面板在无 Antigravity 渠道下的布局与空状态指引；
+  - 修复 JSX 闭合层级，确保客户端 esbuild 编译高效稳定。
+- 🧪 **工程质量与测试套件**：
+  - 同步规则文档断言与用例矩阵，112 个测试套件，**2583 个单元测试 100% 全部通过**。
+
+### v0.4.0
 
 本次为全功能重大版本升级：全量合并 Gitee 上游 41 个最新提交，接入 3 个全新 Provider（**Cline、讯飞星火 Loomy、商汤小浣熊 Raccoon**），支持矩阵扩展至 **14 个 Provider**，并新增多款最新大语言模型与全局一键签到，同时彻底解决了 DSH Desktop 宿主兼容性与启动故障。
 
@@ -172,7 +186,7 @@
   - 顶部操作栏（重测所有/重置受限/新建账号）启用弹性自适应布局（`flex-wrap`），适配多分辨率与不同面板宽度；
   - 引入 `info` 紫色色调提示气泡，状态展示层次更分明。
 - 🚀 **自动化部署脚本增强 (`deploy-antigravity.ps1`)**：
-  - 部署到 DSH Desktop 运行时（`F:\Users\Administrator\AppData\Local\Programs\DSH Desktop`）时，自动检测并安全清理旧的遗留产物；
+  - 部署到 DSH Desktop 运行时（`%LOCALAPPDATA%\Programs\DSH Desktop`）时，自动检测并安全清理旧的遗留产物；
   - 保持逐文件 SHA256 无损比对与 Node 语法自检。
 - 🧪 **单元测试体系健全**：
   - 补充 `tests/unit/buddy-adapter.spec.ts` 中无可用账号时的防护回归用例，70 个单测全部 100% 通过。
@@ -201,7 +215,6 @@
 1. **全渠道平台原生适配**
    - **华为云 CodeArts Agent**：基于 IAM OAuth2 授权与 STS 临时凭据，接入华为 Snap-Access 网关，完整支持 `SDK-HMAC-SHA256` 鉴权与实时推理。
    - **腾讯 CodeBuddy / WorkBuddy**：完整支持国内版（`copilot.tencent.com`）与国际版（`codebuddy.ai` / `workbuddy.ai`）全系生态。
-   - **Google Antigravity**：本地 IDE 私有 RPC 隧道直连，零凭据依赖，随 IDE 启动即用。
 2. **多账号池管理与智能轮换 (Account Pool)**
    - 支持在单一平台下配置多个账号。
    - 自动检测账号健康状态、配额与限流情况，支持跨账号轮换或故障转移，轻松突破单账号频率上限。
@@ -220,7 +233,6 @@
 
 | 渠道 Provider | 支持环境 / 版本 | 认证与连接方式 | 代表性支持模型 |
 | :--- | :--- | :--- | :--- |
-| **Antigravity (Google)** | Antigravity IDE (Windows/macOS) | 本地私有 RPC 直连（零配置，自动发现） | `Gemini 3.8 Flash (High)`、`Gemini 3.7 Flash`、`Gemini 3.1 Pro (High)`、`GPT-OSS 120B (Medium)`、`Claude 3.7 Sonnet (Thinking)`、`Claude 3.5 Sonnet` 等 14+ 模型 |
 | **CodeArts Agent** | 华为云 CodeArts | 华为云 IAM 统一认证 + STS 临时凭据 | `deepseek-v4-pro`、`deepseek-v4-lite`、`deepseek-v3`、`deepseek-r1`、`qwen-2.5-coder`、`codearts-snap` 等 |
 | **CodeBuddy (国内版)** | 腾讯云 CodeBuddy | 微信扫码 / 手机验证码 / 腾讯 OAuth | `deepseek-v3`、`deepseek-r1`、`glm-5.3`、`glm-4-plus`、`kimi-k3`、`hunyuan-standard` 等 14 款精选模型 |
 | **CodeBuddy (国际版)** | CodeBuddy AI Global | 国际版 GitHub / Google / Email 登录 | 国际版全系模型支持 |
@@ -248,15 +260,13 @@
    │           │ 自动保活调度                                 │
    │   ┌───────▼───────┐   ┌──────────────────────────────┐   │
    │   │ Auto Refresh  │   │ LLM Adapters 统一适配层      │   │
-   │   │ 30分钟静默巡检│   │ - AntigravityLocalAdapter    │   │
-   │   │               │   │ - CodeArtsAdapter            │   │
+   │   │ 30分钟静默巡检│   │ - CodeArtsAdapter            │   │
    │   │               │   │ - BuddyAdapter (Code/Work)   │   │
    │   └───────────────┘   └───────────────┬──────────────┘   │
    └───────────────────────────────────────┼──────────────────┘
                                            ▼
    ┌──────────────────────────────────────────────────────────┐
    │                     模型推理与网关接入                    │
-   │   - Google Antigravity: 本地 Language Server RPC 隧道    │
    │   - 华为云 CodeArts: Snap Access (IAM / STS 签名)        │
    │   - 腾讯 CodeBuddy / WorkBuddy: Copilot OpenAPI / Meter  │
    └──────────────────────────────────────────────────────────┘
@@ -265,7 +275,6 @@
 1. **凭据隔离**：账号敏感 Token 保存在 DSH 内部凭据系统（`.credentials.yaml`），配置元数据保存在 `settings.yaml`，保障多账号安全性。
 2. **事件总线**：账号的增添、删除、开关状态切换统一通过 `AccountPool.notifyAccountsChanged` 广播。
 3. **动态同步**：收到广播后，`syncConfigurableProviders` 计算当前活跃渠道集合，调用 `ctx.llm.registerConfigurableProviders` 原子替换模型目录，实现与界面的毫秒级联动。
-4. **Antigravity 本地直连**：通过自动发现本机的 `language_server_windows_x64` 进程及对应的监听端口和 CSRF Token，以本地 loopback 方式完成推理通信，不依赖外部公共 API，零风控风险。
 
 ---
 
@@ -314,13 +323,7 @@ dsh plugin --profile web add "https://github.com/zhengwuji/Jet-Hub.git"
 2. 点击左侧工具栏底部的 **设置 (Settings)** 图标。
 3. 在左侧菜单列表中找到并点击 **Jet Hub**，即可打开凭据与多账号管理中心。
 
-### 步骤二：使用 Antigravity (Google) 本地模型
-1. 只要本机已安装并启动 **Antigravity IDE**，Jet Hub 会自动检测到本地服务（显示绿色已连接、监听端口与可用模型数）。
-2. 直接切换到 DSH **设置 -> 模型 (Models)** 页面。
-3. 在提供方列表中找到 **Antigravity (Google)**，选择您心仪的模型（如 `Gemini 3.8 Flash (High)`、`Claude 3.7 Sonnet (Thinking)` 或 `GPT-OSS 120B`）。
-4. 在主对话窗口即可直接提问，支持完整的流式响应与长会话多轮交互。
-
-### 步骤三：添加华为云与腾讯账号
+### 步骤二：添加华为云与腾讯账号
 1. 在 Jet Hub 界面左侧选择需要添加的目标渠道（例如：`CodeArts (华为云)` 或 `CodeBuddy (国内版)`）。
 2. 点击右上角的 **+ 新建账号** 按钮。
 3. 系统会自动调起默认系统浏览器，打开官方授权登录页面：
@@ -329,7 +332,7 @@ dsh plugin --profile web add "https://github.com/zhengwuji/Jet-Hub.git"
 4. 授权成功后，浏览器会重定向到本地回调端口，Jet Hub 将自动完成 Token 兑换，并展示“账号授权成功”提示。
 5. 此时返回 Jet Hub，界面将展示当前账号的昵称、账号 ID、过期时间与有效状态。
 
-### 步骤四：账号运维与每日积分
+### 步骤三：账号运维与每日积分
 - **一键测速 (重测所有 / 单账号重测)**：点击卡片上的测速按钮，系统会向对应平台发送探针请求，返回当前网络延迟与连通状态。
 - **每日领积分 (CodeBuddy 专属)**：CodeBuddy 渠道卡片提供了“一键领取 / 签到”按钮，可直接获取官方每日免费赠送额度。
 - **启用 / 停用账号**：通过开关按钮可以临时停用某个账号，被停用的账号不会参与模型调用。
@@ -349,22 +352,15 @@ dsh plugin --profile web add "https://github.com/zhengwuji/Jet-Hub.git"
 
 ## ❓ 常见问题排查 (FAQ)
 
-#### Q1：使用 Antigravity 模型时提示“IDE 未运行”？
-- **原因**：Antigravity 本地通道通过连接本机运行的 Antigravity IDE 语言服务提供推理。
-- **解决办法**：请启动 Antigravity IDE 软件并保持在后台运行，Jet Hub 即可在数秒内自动建立连接。
-
-#### Q2：Antigravity 多轮对话中会反复新建对话框吗？
-- **不会**。Jet Hub 内部实现了会话锚定机制，在同一 DSH 对话内会持续复用同一 IDE Cascade 会话，并在发送消息时实施严格的轨迹时序保护，确保多轮问答连续自然。
-
-#### Q3：点击“+ 新建账号”后浏览器打开了，但显示连接被拒绝或 404？
+#### Q1：点击“+ 新建账号”后浏览器打开了，但显示连接被拒绝或 404？
 - **原因**：本地授权回调服务监听在 `10000` 以上端口（华为云与各大 OAuth 门户的要求）。
 - **解决办法**：请检查是否有代理软件（如 Clash、V2Ray 等）拦截了 `127.0.0.1` 本地回环流量，建议在代理软件中将 `127.0.0.1` 和 `localhost` 加入 Bypass 直连白名单。
 
-#### Q4：为什么我在 Jet Hub 中删除了华为云账号，模型列表里还有 CodeArts？
+#### Q2：为什么我在 Jet Hub 中删除了华为云账号，模型列表里还有 CodeArts？
 - **原因**：这是因为旧版本插件采用静态无条件注册。
 - **解决办法**：请确保已更新至最新版本的 Jet Hub 插件代码，新版已全面支持 `onAccountsChanged` 动态注销逻辑，删除后即自动消失。
 
-#### Q5：账号到期后需要手动重新登录吗？
+#### Q3：账号到期后需要手动重新登录吗？
 - **不需要**。只要授权时获取到了 Refresh Token，后台调度器会在到期前自动续期。仅当官方服务端主动注销凭证（例如修改密码、撤销授权）时，才需要重新点击登录。
 
 ---

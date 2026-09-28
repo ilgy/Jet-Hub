@@ -30,7 +30,6 @@ const STYLES = `
 .dim-jh-providerIcon.lobsterai { background: white; }
 .dim-jh-providerIcon.qoder { background: white; }
 .dim-jh-providerIcon.trae { background: white; }
-.dim-jh-providerIcon.antigravity { background: white; }
 /* Raccoon Work（商汤）：官方图标是深蓝底白色面具，白底容器中显示清晰。 */
 .dim-jh-providerIcon.raccoon { background: white; }
 
@@ -128,12 +127,6 @@ const STYLES = `
    允许换行：按钮数量随 provider 变化（CodeBuddy 有「一键领取积分」，其他没有），
    固定单行在窄面板下必然放不下。 */
 .dim-jh-headerActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 100%; }
-
-/* Antigravity 面板的通道状态提示条 */
-.dim-jh-channelNotice { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2, #eef0f3); background: var(--dsw-alias-bg-layer-2, #f7f8fa); font-size: 12px; line-height: 18px; }
-.dim-jh-channelNotice[data-channel="local"] { border-color: color-mix(in srgb, #22c55e 35%, var(--dsw-alias-border-l2, #eef0f3)); background: rgb(34 197 94 / 8%); color: #15803d; }
-.dim-jh-channelNotice[data-channel="public"] { border-color: color-mix(in srgb, #e37400 35%, var(--dsw-alias-border-l2, #eef0f3)); background: rgb(227 116 0 / 8%); color: #b45309; }
-.dim-jh-channelNotice[data-channel="unavailable"] { border-color: color-mix(in srgb, #d93025 35%, var(--dsw-alias-border-l2, #eef0f3)); background: rgb(217 48 37 / 8%); color: #b3261e; }
 
 /* 上一次「重测 / 重置」的结果提示 */
 .dim-jh-probeNotice { margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l2, #eef0f3); background: var(--dsw-alias-bg-layer-2, #f7f8fa); font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary, #646a73); }

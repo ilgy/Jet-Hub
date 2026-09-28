@@ -18,8 +18,8 @@
  * ## 数据来源
  *
  * 全部来自本机 Cline 桌面端产物逆向 + 实测（2026-09-25）：
- * - 二进制：`C:\Users\Jet\AppData\Local\Cline\code-sidecar.exe`（bun 单文件，144 MB）
- * - 真实凭据：`C:\Users\Jet\.cline\data\settings\providers.json`
+ * - 二进制：`%LOCALAPPDATA%\Cline\code-sidecar.exe`（bun 单文件，144 MB）
+ * - 真实凭据：`%USERPROFILE%\.cline\data\settings\providers.json`
  *
  * 排查脚本（均为只读）：`scripts/probe-cline-endpoints.mjs`（按关键词提取
  * 二进制字符串窗口）、`probe-cline-models.mjs`、`probe-cline-recommended.mjs`、

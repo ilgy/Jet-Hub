@@ -134,13 +134,13 @@ describe('parseClineTokenPayload', () => {
     success: true,
     data: {
       accessToken: 'workos:eyJhbGciOiJSUzI1NiIs',
-      refreshToken: 'tmgEeM2rd9ybYoWpXl8JqUfvK',
+      refreshToken: 'mock_refresh_token_example_123',
       expiresAt: '2026-09-25T05:23:47.000Z',
       tokenType: 'Bearer',
       userInfo: {
-        subject: 'user_01M3BCQ86DV4S9KKBT85X4GKTV',
-        clineUserId: 'usr-01M3BCV4FYCGJKAWD3MJG3DBQM',
-        email: 'ijetlee@163.com',
+        subject: 'user_01EXAMPLE0000000000000000',
+        clineUserId: 'usr-01EXAMPLE0000000000000000',
+        email: 'user@example.com',
         firstName: '',
         lastName: '',
       },
@@ -150,18 +150,18 @@ describe('parseClineTokenPayload', () => {
   it('解析 {success, data} 信封（字段是驼峰）', () => {
     const payload = parseClineTokenPayload(envelope)
     expect(payload.accessToken).toBe('workos:eyJhbGciOiJSUzI1NiIs')
-    expect(payload.refreshToken).toBe('tmgEeM2rd9ybYoWpXl8JqUfvK')
+    expect(payload.refreshToken).toBe('mock_refresh_token_example_123')
     expect(payload.expiresAt).toBe(Date.parse('2026-09-25T05:23:47.000Z'))
-    expect(payload.accountId).toBe('usr-01M3BCV4FYCGJKAWD3MJG3DBQM')
-    expect(payload.email).toBe('ijetlee@163.com')
+    expect(payload.accountId).toBe('usr-01EXAMPLE0000000000000000')
+    expect(payload.email).toBe('user@example.com')
   })
 
   it('账号 id 取 userInfo.clineUserId（余额端点必须用它）', () => {
     // ⚠️ 不是 JWT 的 sub（`user_…`）—— 实测传 sub 返回
     // `400 {"error":"Invalid request format"}`。
     const payload = parseClineTokenPayload(envelope)
-    expect(payload.accountId).toBe('usr-01M3BCV4FYCGJKAWD3MJG3DBQM')
-    expect(payload.accountId).not.toBe('user_01M3BCQ86DV4S9KKBT85X4GKTV')
+    expect(payload.accountId).toBe('usr-01EXAMPLE0000000000000000')
+    expect(payload.accountId).not.toBe('user_01EXAMPLE0000000000000000_diff')
   })
 
   it('兼容裸响应（无 data 信封）', () => {

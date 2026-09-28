@@ -8,14 +8,12 @@
  *           account.reorder / account.refresh / account.retest / account.retestAll /
  *           account.reset / account.resetAll / login.poll /
  *           credits.status / credits.claimAll / credits.balances /
- *           model.list / model.setDisabled / antigravity.channelProbe /
+ *           model.list / model.setDisabled /
  *           backup.export / backup.import / backup.status
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
-import { getAntigravityAdapter, ANTIGRAVITY_PROVIDER } from './antigravity-local-adapter.js'
-import { readAntigravityCredential } from './antigravity.js'
 import { AccountPool } from './account-pool.js'
 import type { CodeArtsAuth } from './service.js'
 import type { CodeArtsCredential } from './types.js'
@@ -800,55 +798,6 @@ function registerJetHubEndpoints(
     switch (method) {
       case 'account.list': {
         const req = payload as RpcListAccountsRequest
-        if (req.provider === 'antigravity') {
-          const adapter = getAntigravityAdapter()
-          const cred = readAntigravityCredential()
-          const probe = adapter ? await adapter.probeChannels({ force: true }) : undefined
-          if (probe?.channel === 'local') {
-            const modelCountDesc = probe.local?.modelCount ? ` · ${probe.local.modelCount} 个可用模型` : ''
-            const accounts = [
-              {
-                id: 'antigravity-local',
-                provider: 'antigravity',
-                nickname: 'Antigravity 本地私有通道',
-                enabled: true,
-                credentialRef: `本地私有 RPC (PID ${probe.local?.pid ?? '-'}, 端口 ${probe.local?.port ?? '-'}${modelCountDesc})`,
-                refreshable: false,
-                createdAt: Date.now(),
-                isLocalReuse: true,
-              },
-            ]
-            return { ok: true, value: { accounts } }
-          }
-          if (cred !== undefined) {
-            const accounts = [
-              {
-                id: 'antigravity-local',
-                provider: 'antigravity',
-                nickname: 'Antigravity IDE 本地凭据',
-                enabled: true,
-                credentialRef: cred.source ?? '本地 state.vscdb',
-                refreshable: false,
-                createdAt: Date.now(),
-                isLocalReuse: true,
-              },
-            ]
-            return { ok: true, value: { accounts } }
-          }
-          const accounts = [
-            {
-              id: 'antigravity-local',
-              provider: 'antigravity',
-              nickname: 'Antigravity 本地私有通道',
-              enabled: true,
-              credentialRef: '未检测到运行中的 Antigravity IDE（启动 IDE 后自动连接）',
-              refreshable: false,
-              createdAt: Date.now(),
-              isLocalReuse: true,
-            },
-          ]
-          return { ok: true, value: { accounts } }
-        }
         const accounts = await pool.listAccounts(req.provider)
         return { ok: true, value: { accounts } }
       }
@@ -1203,14 +1152,12 @@ function registerJetHubEndpoints(
 
       case 'account.update': {
         const req = payload as RpcUpdateAccountRequest
-        if (req.accountId === 'antigravity-local') return { ok: true, value: undefined }
         await pool.updateAccount(req.accountId, req.patch)
         return { ok: true, value: undefined }
       }
 
       case 'account.delete': {
         const req = payload as RpcDeleteAccountRequest
-        if (req.accountId === 'antigravity-local') return { ok: true, value: undefined }
         await pool.removeAccount(req.accountId)
         return { ok: true, value: undefined }
       }
@@ -1292,11 +1239,6 @@ function registerJetHubEndpoints(
             case TRAE_INTL.id:
               await traeIntl.refreshAccountCredential(entry.credentialRef)
               break
-            case ANTIGRAVITY_PROVIDER:
-              // Antigravity 不进账号池，凭据由 IDE 自己续期（见 AGENTS.md 约束 5）。
-              // 此处不提供按账号续期入口是刻意的：给它一个"刷新"按钮会诱导用户
-              // 手动轮换 Google 侧凭据，正是要避免的行为。
-              throw new Error('Antigravity 凭据由 IDE 自行续期，无需手动刷新')
             case CLINE.id:
               await cline.refreshAccountCredential(entry.credentialRef)
               break
@@ -1578,11 +1520,6 @@ function registerJetHubEndpoints(
       // 重测发一次最小对话请求：正常返回才清除标记，仍受限则保留并回报原因。
       case 'account.retest': {
         const req = payload as RpcRetestAccountRequest
-        if (req.accountId === 'antigravity-local') {
-          const adapter = getAntigravityAdapter()
-          if (adapter) await adapter.probeChannels({ force: true })
-          return { ok: true, value: { accounts: [], clearedCount: 0 } }
-        }
         const account = await retestAccount(pool, req.accountId)
         return {
           ok: true,
@@ -1601,9 +1538,6 @@ function registerJetHubEndpoints(
       // ── 限流标记：重置（不发请求，直接清除）──
       case 'account.reset': {
         const req = payload as RpcResetAccountRequest
-        if (req.accountId === 'antigravity-local') {
-          return { ok: true, value: { accounts: [], clearedCount: 0 } }
-        }
         const value = await resetAccount(pool, req.accountId)
         return { ok: true, value }
       }
@@ -1616,29 +1550,6 @@ function registerJetHubEndpoints(
 
       // ── 每日签到（积分领取）──
       // 查询某 provider 下全部启用账号的签到状态。
-      // Antigravity 通道探测：面板据此显示「当前走哪条通道、为什么」。
-      //
-      // 本渠道不属于账号池体系（见 AGENTS.md 防封号约束），因此这里既不需要
-      // provider 参数，也不返回账号列表 —— 界面展示的是**通道**状态，不是账号。
-      case 'antigravity.channelProbe': {
-        const req = payload as { force?: boolean } | undefined
-        const adapter = getAntigravityAdapter()
-        if (adapter === undefined) {
-          return {
-            ok: true,
-            value: {
-              channel: 'unavailable',
-              local: { available: false, reason: 'Antigravity 适配器尚未注册' },
-              public: { available: false, reason: 'Antigravity 适配器尚未注册' },
-              message: 'Antigravity 适配器尚未注册，请重启 DSH 后重试。',
-            },
-          }
-        }
-        // force 由面板的「重测」按钮传入：绕过 60 秒缓存，强制重新探测。
-        const probe = await adapter.probeChannels({ force: req?.force === true })
-        return { ok: true, value: probe }
-      }
-
       //
       // 四个 provider 分属**三套互不相同的协议**，各自在自己的分支里处理：
       //   - CodeBuddy 系（buddy / workbuddy）：`productById()` 取 BuddyProduct，

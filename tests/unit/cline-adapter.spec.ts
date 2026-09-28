@@ -17,11 +17,11 @@ const here = dirname(fileURLToPath(import.meta.url))
 /** 实测凭据形态（access_token 自带 workos: 前缀）。 */
 const cred: ClineCredential = {
   access_token: 'workos:eyJhbGciOiJSUzI1NiIs',
-  refresh_token: 'tmgEeM2rd9ybYoWpXl8JqUfvK',
+  refresh_token: 'mock_refresh_token_example_123',
   expire_time: Date.now() + 3_600_000,
-  account_id: 'usr-01M3BCV4FYCGJKAWD3MJG3DBQM',
-  email: 'ijetlee@163.com',
-  nickname: 'ijetlee@163.com',
+  account_id: 'usr-01EXAMPLE0000000000000000',
+  email: 'user@example.com',
+  nickname: 'user@example.com',
 }
 
 /** 固定目录（离线；含免费与付费条目）。 */
