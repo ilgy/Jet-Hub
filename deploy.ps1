@@ -165,7 +165,7 @@ Write-Ok "已替换 $copied 项"
 
 # ══════════════════════════════════════════════════════════════════════
 Write-Step '3. 清理已废弃的遗留产物'
-# 清理运行时中源码已经不存在的旧文件（如 antigravity* 等）
+# 清理运行时中源码已经不存在的旧文件（历史遗留产物）
 $runtimeLib = Join-Path $Runtime 'lib'
 $sourceLibFiles = Get-ChildItem $srcLib -Recurse -File | ForEach-Object {
   $_.FullName.Substring($srcLib.Length + 1)
