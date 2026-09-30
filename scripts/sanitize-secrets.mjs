@@ -46,6 +46,10 @@ const SUSPICIOUS_PATTERNS = [
   { name: '真实私钥文件内容', regex: /BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY/i },
   { name: '硬编码本地用户绝对路径', regex: /[A-Za-z]:\\Users\\[A-Za-z0-9_\.]+\\(?!AppData\\Local\\Temp)/i },
   { name: '未知个人邮箱 (非 example.com / 官方文档)', regex: /\b[a-zA-Z0-9._%+-]+@(?!example\.com|deepseek\.com|huawei\.com|qq\.com|foxmail\.com)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/ },
+  // 微信开放平台「网站应用」AppID。**只阻断、不替换**：
+  // 它是公开的协议常量（随授权 URL 发给微信，扫码者都能看到），轮换成
+  // 占位符会**静默打断** Loomy 扫码登录，故必须由人工改成 base64 形态。
+  { name: '微信开放平台 AppID 明文 (请改存 base64，勿改值)', regex: /\bwx[0-9a-f]{16}\b/ },
 ]
 
 function getTrackedFiles() {

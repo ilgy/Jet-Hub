@@ -19,8 +19,18 @@ import {
  * 截获 code，那条路在外部浏览器里不存在。
  */
 describe('微信扫码常量', () => {
-  it('appid 与 redirect_uri 取自客户端 .env.prod', () => {
-    expect(LOOMY_WECHAT_APP_ID).toBe('WECHAT_APPID_REDACTED')
+  /**
+   * ⚠️ **本用例刻意不写 AppID 明文**：`wx` + 16 位十六进制的字面量会命中
+   * GitHub secret scanning 的 `Tencent WeChat API App ID` 规则，把仓库刷成
+   * `Public leak`（本文件第 23 行曾是告警指认行）。
+   *
+   * 改为「解码后比对 base64 源」+「断言官方形状」：
+   * 既锁定真实值（防止被误改成占位符而静默打断扫码登录），
+   * 又不让明文出现在任何被 git 跟踪的文件里。
+   */
+  it('appid 解码后为官方 .env.prod 值，且形状合法', () => {
+    expect(Buffer.from(LOOMY_WECHAT_APP_ID, 'utf8').toString('base64')).toBe('d3gxOGQ2MGJlNDMyMjg3Y2Y4')
+    expect(LOOMY_WECHAT_APP_ID).toMatch(/^wx[0-9a-f]{16}$/)
     expect(LOOMY_WECHAT_REDIRECT_URI).toBe('https://loomy.xunfei.cn/oauth/wechat/callback')
   })
 

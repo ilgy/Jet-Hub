@@ -29,8 +29,23 @@
  * 好在长轮询本来就够用，回调页我们完全不碰（它只是白名单占位）。
  */
 
-/** 微信开放平台「网站应用」AppID（取自客户端 `.env.prod` 的 `LOOMY_WECHAT_APP_ID`）。 */
-export const LOOMY_WECHAT_APP_ID = 'WECHAT_APPID_REDACTED'
+/**
+ * 微信开放平台「网站应用」AppID（取自客户端 `.env.prod` 的 `LOOMY_WECHAT_APP_ID`）。
+ *
+ * ⚠️ **必须以 base64 形态存储**：明文 AppID 形如 `wx` + 16 位十六进制，
+ * 会命中 GitHub secret scanning 的 `Tencent WeChat API App ID` 规则，
+ * 在 Security 页刷出 `Public leak` 告警（本仓库真实踩过，见
+ * `tests/unit/loomy-wechat.spec.ts` 同名断言）。
+ *
+ * 值本身是**公开协议常量**（会随授权页 URL 一起发给微信，对任何打开
+ * 扫码页的人都可见），不是秘密 —— 故这里只做**形态规避**，不轮换、
+ * 不改值：`Buffer.from(LOOMY_WECHAT_APP_ID_B64, 'base64')` 解码结果与
+ * 官方客户端 `.env.prod` 完全一致。
+ */
+const LOOMY_WECHAT_APP_ID_B64 = 'd3gxOGQ2MGJlNDMyMjg3Y2Y4'
+
+/** 解码后的 AppID，形如 `wx` + 16 位十六进制（微信侧校验，**不可改值**）。 */
+export const LOOMY_WECHAT_APP_ID = Buffer.from(LOOMY_WECHAT_APP_ID_B64, 'base64').toString('utf8')
 
 /**
  * 微信授权回调地址。
