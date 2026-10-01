@@ -82,9 +82,30 @@ findAccount → byokApiKeyLooksMalformed → byokResolveBaseUrl
 | 带 Key | 200 | **404 Route Not Found** | ✓ 端点确实存在 |
 
 ⇒ **「无区分度」≠「端点不存在」**，这类 origin 必须**带 Key 复测**。
-`src/byok-product.ts` 里 19 个平台的 baseUrl 都是这样用「候选路径 vs 随机路径」
+`src/byok-product.ts` 里 25 个平台的 baseUrl 都是这样用「候选路径 vs 随机路径」
 对照组逐个校正过的 —— 这也是**平台清单必须由服务端下发**的原因：
 客户端抄一份必然漂移，而服务端本来就掌握平台解析权。
+
+#### 25 个预设平台的全量复核（2026-10-02，零异常）
+
+判据按 `publicCatalog` 分两类，各自只有一条有区分度的标准：
+
+| 类别 | 平台 | 判据 | 实测结果 |
+| --- | --- | --- | --- |
+| `publicCatalog: true`（5 个） | `openrouter` / `chutes` / `nvidia` / `sambanova` / `novita` | 不带 Key 返回**可解析的非空模型列表** | 200，分别 463 / 14 / 81 / 7 / 121 个模型 ✅ |
+| 其余（20 个） | `zhipu` … `ollama` | 不带 Key **必须被拒**（非 2xx） | 401（18 个）/ 403（`qianfan`、`cerebras`） ✅ |
+
+⚠️ **三个「无区分度」origin 的正确解读**（都不是 base 路径写错）：
+`volces`（`ark.cn-beijing.volces.com`）与 `deepseek`（`api.deepseek.com`）在
+**前置网关**（`istio-envoy` / `server: （无）`）就把请求挡下并回 401，
+候选路径、随机路径、甚至 `chat/completions` 的**信封完全一致** ⇒
+状态码层面永远测不出端点存在性。两者的 base 路径只能**查官方文档确认**
+（`/api/v3`、`/v1` 均与官方 OpenAI 兼容示例一致）。
+第三个 `ollama` 更值得记一笔：`127.0.0.1:11434` 上**未必是 Ollama** ——
+实测该端口被第三方本地代理 `cmdcode2api.exe` 占用，它对**任意**路径都回
+`405/401 missing Authorization header`（真 Ollama 不需要鉴权、未知路径回 404）。
+⇒ 本地端口类预设平台的「无区分度」**先查端口占用**（`Get-NetTCPConnection -LocalPort 11434`），
+不要据此改 base 路径。
 
 ---
 
