@@ -85,6 +85,25 @@ describe('ByokAdapter 模型目录', () => {
     }
   })
 
+  it('⚠️ 只有确凿免费的模型才带「（免费）」后缀，未知的一律裸 id', async () => {
+    const adapter = makeAdapter({
+      loadModels: async () => ({
+        models: [{ id: 'glm-4-flash', free: true }, { id: 'glm-5.3' }],
+        warnings: [],
+      }),
+    })
+    expect(adapter.listAllModels()).toEqual([])
+    await adapter.listModels(BYOK.id)
+    expect(adapter.listAllModels()).toEqual([
+      { id: 'glm-4-flash', name: 'glm-4-flash（免费）' },
+      { id: 'glm-5.3', name: 'glm-5.3' },
+    ])
+    const listed = await adapter.listModels(BYOK.id)
+    expect(listed.map(model => model.name)).toEqual(['glm-4-flash（免费）', 'glm-5.3'])
+    // ⚠️ id 必须是**裸** id：后缀只进展示名，否则请求会打到不存在的模型上。
+    expect(listed.map(model => model.id)).toEqual(['glm-4-flash', 'glm-5.3'])
+  })
+
   it('⚠️ resolveModel 不声明 defaultMaxTokens / reasoning / context（远端无此信息）', async () => {
     const adapter = makeAdapter()
     const resolved = await adapter.resolveModel(BYOK.id, 'glm-4.6')
@@ -264,6 +283,34 @@ describe('ByokAdapter 目录自动刷新', () => {
       await adapter.listModels(BYOK.id)
       expect(onCatalogChanged).toHaveBeenCalledTimes(1)
       ids.push('glm-5.3')
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('⚠️ 只有 free 标记变了（id 集合一个字没变）也要通知 —— 否则「免费」后缀永远刷不出来', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const onCatalogChanged = vi.fn()
+      let free = false
+      const adapter = makeAdapter({
+        loadModels: async () => ({
+          models: [free ? { id: 'glm-4.5', free: true } : { id: 'glm-4.5' }],
+          warnings: [],
+        }),
+        onCatalogChanged,
+      })
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(1)
+      free = true
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(2)
+      expect(adapter.listAllModels()).toEqual([{ id: 'glm-4.5', name: 'glm-4.5（免费）' }])
+      // 标记没再变 ⇒ 不再通知。
       vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
       await adapter.listModels(BYOK.id)
       expect(onCatalogChanged).toHaveBeenCalledTimes(2)
@@ -538,7 +585,49 @@ describe('loadByokModels', () => {
 
   it('2xx 且是 JSON 时返回模型列表', async () => {
     const loaded = await loadByokModels(cred, fetcher(200, '{"data":[{"id":"glm-4.6"}]}'))
-    expect(loaded.models).toEqual([{ id: 'glm-4.6' }])
+    // 智谱的 freeModels 会一并带上（见下一例）；这里只钉住接口给的那条在最前。
+    expect(loaded.models[0]).toEqual({ id: 'glm-4.6' })
+  })
+
+  it('⚠️ 平台表里的 freeModels 会被追加进来（智谱的免费模型不在 /models 里）', async () => {
+    // 实测：/models 只给 glm-4.5 ~ glm-5.3（全计费），免费模型压根不列。
+    const loaded = await loadByokModels(cred, fetcher(200, '{"data":[{"id":"glm-5.3"}]}'))
+    expect(loaded.models[0]).toEqual({ id: 'glm-5.3' })
+    expect(loaded.models).toContainEqual({ id: 'glm-4-flash', free: true })
+    // 顺序稳定：接口给的在前，追加的在后；且 id 不重复。
+    const ids = loaded.models.map(model => model.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('接口自己报了价格时按价格标 free=true（OpenRouter / Novita 形态）', async () => {
+    const loaded = await loadByokModels(
+      { ...cred, platform: 'openrouter', base_url: 'https://openrouter.ai/api/v1' },
+      fetcher(200, JSON.stringify({
+        data: [
+          { id: 'free-one:free', pricing: { prompt: '0', completion: '0' } },
+          { id: 'paid-one', pricing: { prompt: '0.000001', completion: '0.000002' } },
+        ],
+      })),
+    )
+    expect(loaded.models).toEqual([{ id: 'free-one:free', free: true }, { id: 'paid-one' }])
+  })
+
+  it('⚠️ 接口不下发价格时**不标** free（缺省是未知，不是「收费」也不是「免费」）', async () => {
+    const loaded = await loadByokModels(
+      { ...cred, platform: 'openrouter', base_url: 'https://openrouter.ai/api/v1' },
+      fetcher(200, '{"data":[{"id":"a","object":"model","created":1,"owned_by":"x"}]}'),
+    )
+    expect(loaded.models).toEqual([{ id: 'a' }])
+  })
+
+  it('⚠️ 接口已经列出免费 id 时**就地**补 free 标记（不重复、不改位置）', async () => {
+    const loaded = await loadByokModels(cred, fetcher(200, '{"data":[{"id":"glm-5.3"},{"id":"glm-4-flash"}]}'))
+    expect(loaded.models).toEqual([
+      { id: 'glm-5.3' },
+      { id: 'glm-4-flash', free: true },
+      { id: 'glm-4.5-flash', free: true },
+      { id: 'glm-z1-flash', free: true },
+    ])
   })
 
   it('非 2xx 时抛出「状态码 + 远端明细」的文案（要能直接给用户看）', async () => {

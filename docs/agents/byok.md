@@ -253,6 +253,72 @@ DSH（与「关闭模型不生效」是同一处坑，见 `src/jet-hub-rpc.ts` �
 - `notifyCatalogChanged()` 内部 try/catch：宿主事件抛异常不能反噬已经拿到的目录。
 - BYOK 凭据里的 `models?: readonly string[]`（`src/byok.ts:51-55`）**适配器从不读**，
   目录一律走 `GET /models`；那个字段只是历史遗留的解析宽容度。
+- ⚠️ `byokSameModelIds(a, b)` 必须**连 `free` 一起比**：平台把某个模型从收费改成
+  免费（或反之）时 id 集合**一个字都没变**，只比 id 会让界面上的「（免费）」后缀
+  永远刷不出来 —— 与「只比 id 不看 TTL」是同一类漏判。改这个函数时别顺手「简化」
+  回 `Set<id>`。
+
+---
+
+### ⚠️ 「免费」能不能显示：取决于平台**是否下发价格**，不能反推
+
+用户问「没有显示是不是免费的，我怎么知道？」—— 规范答案分两半，缺哪一半都会答错：
+
+**第一半：`/models` 通常根本没有价格字段。** 实测智谱
+`GET https://open.bigmodel.cn/api/paas/v4/models` → 200 / 848 B，每个条目只有
+`id` / `object` / `created` / `owned_by`。全表搜不到 price / pricing / free /
+cost / billing / quota 任何一个字段。所以「列表里没有免费标记」**不是漏做**，
+是 OpenAI 兼容的 `/models` 规范里压根没有这一项。**任何把「无标记」解释成
+「收费」或「免费」的做法都是编造。**
+
+**第二半：能拿到价格时必须真的标出来。** `parseByokFreeModelIds(body)`
+（`src/byok.ts`）只认三类**有据可查**的写法：
+
+| 形态 | 例子 | 判据 |
+|---|---|---|
+| `pricing:{prompt,completion}` | OpenRouter（464 个里 21 个命中） | 两者都存在且数值为 `0` |
+| `input_token_price_per_m` / `output_token_price_per_m` | Novita（121 个里 7 个命中） | 两者都存在且数值为 `0` |
+| `is_free` / `free` | 少数自建网关 | 严格 `=== true` |
+
+⚠️ 三条硬约束，改动时逐条对照：
+
+1. **只认确凿的 0**。字段缺失 = **未知**，不是 0（`byokZeroPrice` 对 `undefined`
+   与不可解析字符串都返回 false）。标错「免费」会让用户在最贵的那一档上跑。
+2. **OpenRouter 的 `pricing` 里有 `image:"-1"` 这类哨兵值**，故只读
+   `prompt` / `completion` 两个字段，**不能**改成「整个 pricing 对象全是 0 才免费」。
+3. **Novita 的 `pricing` 是嵌套对象**（`pricing.prompt.price_per_m: 1500`），
+   `Number({})` 是 `NaN` 而非 `0` ⇒ 两条规则不会互相误触；但它同时给了扁平的
+   `input_token_price_per_m`，所以 Novita 走第二条规则。
+
+标记进的是 `name` 后缀「（免费）」，**不是 `description`**（本仓约定：计费相关
+一律进 `name`，见 AGENTS.md 的 billing multiplier 一条），且**只加到展示名**——
+`id` 必须保持裸 id，否则请求会打到不存在的模型上。
+
+---
+
+### ⚠️ 智谱的免费模型**不在** `/models` 里，必须靠平台表补
+
+这是「全是收费的？」这个误解的**数据根因**：实测一个余额为 0 的智谱账号，
+
+```
+POST /chat/completions  max_tokens:1
+glm-4.5 / 4.5-air / 4.6 / 4.7 / glm-5 / 5-turbo / 5.1 / 5.2 / 5.3 / 5.3-flash / 5.3-flashx
+  → 全部 429 {"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}
+glm-4-flash / glm-4.5-flash / glm-4-flash-250414 / glm-z1-flash
+  → 全部 200（同样余额 0）
+```
+
+即：**免费模型能调，但接口一个都不下发**。只信 `/models` 的插件里就只剩收费模型。
+故 `ByokPlatform` 多了 `freeModels?: readonly string[]`（`src/byok-product.ts`），
+`loadByokModels` 把它**合并**进目录：接口已列出的就地补 `free: true`（顺序不变），
+没列出的追加在末尾。
+
+维护约定：**只加实测过 `POST /chat/completions`（`max_tokens:1`）返回 2xx 的 id**，
+不加「文档说免费」的 id。宁可少列（用户仍可在「自定义」里手填 base url），不可列错
+—— 列错会让请求直接 4xx。
+
+`freeModels` 还是**平台表里唯一的非 URL 静态数据**，故测试钉了两条不变量：
+只允许出现在有 `baseUrl` 的平台、id 无空白无重复。
 
 ---
 
@@ -311,15 +377,26 @@ case BYOK.id:
 | 新增了第二个账号但模型没变多 | 同上；另确认客户端在收到 `llm/adapters-updated` 后确有 refresh（`ModelCatalogDirectory` 在 `ready` 时短路返回缓存） |
 | 单个平台一直失败、其它正常 | 该平台的 baseUrl 需要用「候选路径 vs 随机路径」对照组**带 Key** 重测 |
 | 账号卡片「有效期」显示「不适用（API Key 无固定有效期）」 | **正常**：BYOK 凭据没有 `expiresAt`，不是凭据损坏 |
+| 列表里没有「（免费）」后缀 | **先看该平台的 `/models` 到底有没有价格字段**（智谱/NVIDIA/SambaNova 都没有 ⇒ 无标记是正常的，语义是「未知」）。OpenRouter 这类给了 `pricing` 的平台没标出来才是缺陷 |
+| 余额为 0，付费模型全 429「余额不足或无可用资源包」 | **正常**：预付费平台余额耗尽即拒服务。查该平台是否配了 `freeModels`（智谱已配 3 个，见上文）——免费模型是唯一还能用的部分 |
+| 免费模型报 403「您无权访问 xxx」 | 该 id 不在这个账号的权限内（如 `glm-4.6-flash`）；从 `freeModels` 里去掉，别留着 |
 
 ### 相关测试
 
 - `tests/unit/byok.spec.ts` —— 纯函数层（平台表完整性、目录解析三信封、
-  凭据解析必含 `base_url`、请求头、昵称不含 Key 前段、Key 形态预检）。
+  凭据解析必含 `base_url`、请求头、昵称不含 Key 前段、Key 形态预检、
+  **免费判定 8 例：OpenRouter `pricing` 双 0 / `-1` 哨兵不误判 /
+  Novita 双 0 / Novita 嵌套 pricing 不误判 / 只给一个价格字段不判 /
+  `is_free` 严格 `=== true` / 智谱式目录一个都不标 / 裸字符串与垃圾入参**）。
+  ⚠️ 平台表那两条 `freeModels` 不变量（只在有 `baseUrl` 的平台、
+  id 无空白无重复）是**结构约束**，加平台时会被它们拦住。
 - `tests/unit/byok-adapter.spec.ts` —— 适配器行为（目录缓存 / **目录自动刷新
-  四例：TTL 重拉、指纹变更立即重拉、`onCatalogChanged` 只在集合真变时触发、
-  失败保留旧目录** / in-flight 共享 / 门控 / 失败不缓存但有 30s 冷却 /
-  `max_tokens` 截断 / 图片拒绝 / 401 不续期 / 429 换号 / 换号判据 / TRANSPORT / aborted）。
+  五例：TTL 重拉、指纹变更立即重拉、`onCatalogChanged` 只在集合真变时触发、
+  **只有 `free` 标记变了也要通知**、失败保留旧目录** / in-flight 共享 / 门控 /
+  失败不缓存但有 30s 冷却 / `max_tokens` 截断 / 图片拒绝 / 401 不续期 /
+  429 换号 / 换号判据 / TRANSPORT / aborted / **`loadByokModels` 的免费合并
+  五例：表内追加、就地补标记不改顺序、按接口价格标 free、不下发价格不标、
+  非 2xx 文案**）。
   ⚠️ 用例用 `vi.useFakeTimers({ toFake: ['Date'] })` + `vi.setSystemTime`：TTL 与
   冷却都以 `Date.now()` 为基准，只 fake `Date` 就不会干扰 Promise 微任务。
 - `tests/unit/byok-rpc-dispatch.spec.ts` —— 源码扫描式分派回归。

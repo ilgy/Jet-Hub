@@ -94,27 +94,94 @@ export interface ByokKeyValidation {
  * @returns 去重后的模型 id 列表（保序）。
  */
 export function parseByokModelList(body: unknown): string[] {
-  if (typeof body !== 'object' || body === null) return []
-  const record = body as Record<string, unknown>
-  const raw = Array.isArray(record.data) ? record.data
-    : Array.isArray(record.models) ? record.models
-    : Array.isArray(body) ? body
-    : []
   const seen = new Set<string>()
   const out: string[] = []
-  for (const item of raw) {
-    const id = typeof item === 'string'
-      ? item
-      : typeof item === 'object' && item !== null
-        ? readFirstString(item as Record<string, unknown>, ['id', 'name', 'model'])
-        : undefined
+  for (const item of byokModelEntries(body)) {
+    const id = byokEntryId(item)
     if (id === undefined) continue
-    const key = id.trim()
-    if (key.length === 0 || seen.has(key)) continue
-    seen.add(key)
-    out.push(key)
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
   }
   return out
+}
+
+/**
+ * 从模型目录里挑出**可判定为免费**的模型 id。
+ *
+ * ⚠️ 绝大多数平台的 `/models` **不含任何价格字段**（智谱、NVIDIA、SambaNova …
+ * 只有 `id`/`object`/`created`/`owned_by`）⇒ 它们的模型**一个都不会出现**在
+ * 返回值里。「未标注」的语义是**未知**，绝不是「收费」，调用方不得反推。
+ *
+ * 目前只认三类**有据可查**的写法，其余一律不认（宁可漏标，不可误标 ——
+ * 误标「免费」会让用户在最贵的那一档上跑）：
+ *
+ * | 形态 | 例子 | 判据 |
+ * |---|---|---|
+ * | `pricing:{prompt,completion}` | OpenRouter | 两者都存在且数值为 `0` |
+ * | `input_token_price_per_m` / `output_token_price_per_m` | Novita | 两者都存在且数值为 `0` |
+ * | `is_free` / `free` | 少数自建网关 | 严格 `=== true` |
+ *
+ * ⚠️ OpenRouter 的 `pricing` 里有 `image:"-1"` 这类**哨兵值**（表示不适用），
+ * 故**只**看 `prompt` / `completion` 两个字段，不看整个对象是否「全是 0」。
+ * Novita 的 `pricing` 是**嵌套对象**（`pricing.prompt.price_per_m`），
+ * `Number({})` 为 `NaN` 而非 `0`，所以上面两条规则不会互相误触。
+ */
+export function parseByokFreeModelIds(body: unknown): ReadonlySet<string> {
+  const free = new Set<string>()
+  for (const item of byokModelEntries(body)) {
+    if (typeof item !== 'object' || item === null) continue
+    const id = byokEntryId(item)
+    if (id === undefined) continue
+    if (byokEntryLooksFree(item as Record<string, unknown>)) free.add(id)
+  }
+  return free
+}
+
+/** 取目录数组（兼容 `{data}` / `{models}` / 裸数组三种信封）。 */
+function byokModelEntries(body: unknown): readonly unknown[] {
+  if (typeof body !== 'object' || body === null) return []
+  const record = body as Record<string, unknown>
+  if (Array.isArray(record.data)) return record.data
+  if (Array.isArray(record.models)) return record.models
+  if (Array.isArray(body)) return body
+  return []
+}
+
+/** 取条目 id（裸字符串，或对象的 `id` / `name` / `model`）。 */
+function byokEntryId(item: unknown): string | undefined {
+  const id = typeof item === 'string'
+    ? item
+    : typeof item === 'object' && item !== null
+      ? readFirstString(item as Record<string, unknown>, ['id', 'name', 'model'])
+      : undefined
+  if (id === undefined) return undefined
+  const key = id.trim()
+  return key.length === 0 ? undefined : key
+}
+
+/** 单个条目是否可判定为免费（规则见 {@link parseByokFreeModelIds}）。 */
+function byokEntryLooksFree(entry: Record<string, unknown>): boolean {
+  if (entry.is_free === true || entry.free === true) return true
+  const pricing = entry.pricing
+  if (typeof pricing === 'object' && pricing !== null) {
+    const p = pricing as Record<string, unknown>
+    if (byokZeroPrice(p.prompt) && byokZeroPrice(p.completion)) return true
+  }
+  return byokZeroPrice(entry.input_token_price_per_m) && byokZeroPrice(entry.output_token_price_per_m)
+}
+
+/**
+ * 字段是否是**确凿的 0 价格**。
+ *
+ * ⚠️ 必须排除缺失（`undefined`）与不可解析：「字段不存在」是未知，
+ * 与「价格是 0」完全是两件事。
+ */
+function byokZeroPrice(value: unknown): boolean {
+  if (value === 0) return true
+  if (typeof value !== 'string') return false
+  const text = value.trim()
+  return text.length > 0 && Number(text) === 0
 }
 
 /** 从记录里读第一个非空字符串字段。 */

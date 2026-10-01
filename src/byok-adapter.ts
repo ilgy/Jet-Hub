@@ -40,8 +40,14 @@ import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelIn
 import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { settingsNamespaceFor } from './settings-compat.js'
 import type { Context } from '@deepseek-ai/cordis'
-import { BYOK, byokChatUrl, byokModelsUrl, byokPlatformById } from './byok-product.js'
-import { byokHeaders, isByokExpired, parseByokModelList, type ByokCredential } from './byok.js'
+import { BYOK, byokChatUrl, byokFreeModelsForPlatform, byokModelsUrl, byokPlatformById } from './byok-product.js'
+import {
+  byokHeaders,
+  isByokExpired,
+  parseByokFreeModelIds,
+  parseByokModelList,
+  type ByokCredential,
+} from './byok.js'
 import {
   collectImages,
   consumeOpenAiSse,
@@ -119,12 +125,16 @@ function byokModelSignature(
  *
  * 顺序无关是必须的：并集顺序随账号池顺序变，但那是**同一个目录**，
  * 不该把用户界面上的列表推倒重来。
+ *
+ * ⚠️ 必须连 `free` 一起比：平台把某个模型从收费改成免费（或反之）时
+ * id 集合**一个字都没变**，只比 id 会让界面上少一个「免费」后缀且
+ * 永远刷不出来 —— 与「只比 id 不看 TTL」是同一类漏判。
  */
 function byokSameModelIds(a: readonly ByokModel[] | undefined, b: readonly ByokModel[]): boolean {
   if (a === undefined || a.length !== b.length) return false
-  const left = new Set(a.map(model => model.id))
+  const left = new Map(a.map(model => [model.id, model.free === true]))
   for (const model of b) {
-    if (!left.has(model.id)) return false
+    if (left.get(model.id) !== (model.free === true)) return false
   }
   return true
 }
@@ -142,9 +152,33 @@ function resolveChunkTimeoutMs(): number {
   return Number.parseInt(process.env.DSH_BYOK_SSE_CHUNK_TIMEOUT_MS ?? '', 10) || 120_000
 }
 
-/** 拉取到的原始模型条目。BYOK 的 `/models` 通常只给 id，故只留 id。 */
+/**
+ * 模型在界面上的显示名。
+ *
+ * ⚠️ 后缀放在 `name` 而不是 `description`：本仓的约定是「计费相关的一切
+ * 都进 `name`」（见 AGENTS.md 的 billing multiplier 一条），`description`
+ * 在部分宿主界面里根本不渲染。
+ *
+ * ⚠️ 只在**确凿免费**时加后缀。绝大多数平台的 `/models` 不给价格字段，
+ * 那些模型的 `free` 是 `undefined`（未知），**不能**标成「免费」——
+ * 标错会让用户在最贵的那一档上跑而毫无防备。
+ */
+function byokModelLabel(model: ByokModel): string {
+  return model.free === true ? `${model.id}（免费）` : model.id
+}
+
+/**
+ * 拉取到的原始模型条目。
+ *
+ * BYOK 的 `/models` 通常只给 id；只有**平台自己报了价格**（OpenRouter /
+ * Novita）或**平台表里配了 `freeModels`**（智谱）时，才会带上 `free`。
+ * ⚠️ `free` 缺省的语义是**未知**，不是「收费」；见
+ * {@link parseByokFreeModelIds}。
+ */
 export interface ByokModel {
   id: string
+  /** 可判定为免费（价格字段确凿为 0，或平台表显式列出）。 */
+  free?: boolean
 }
 
 /** `ByokAdapter` 的构造选项。 */
@@ -230,7 +264,22 @@ export async function loadByokModels(
     throw new Error('模型目录不是合法 JSON（该端点可能不是 OpenAI 兼容接口）')
   }
   const ids = parseByokModelList(parsed)
-  return { models: ids.map(id => ({ id })), warnings: [] }
+  const freeFromApi = parseByokFreeModelIds(parsed)
+  const models: ByokModel[] = ids.map(id => freeFromApi.has(id) ? { id, free: true } : { id })
+  const seen = new Set(ids)
+  // 平台表里列出的「免费但 /models 不下发」的模型：已在列表里的**就地补标记**
+  // （平台哪天把它加回 /models，也不该丢掉「免费」后缀），其余追加在末尾
+  // —— 追加保证既有条目的顺序不变，避免目录抖动导致界面重排。
+  for (const id of byokFreeModelsForPlatform(credential.platform)) {
+    if (seen.has(id)) {
+      const at = models.findIndex(model => model.id === id)
+      if (at >= 0) models[at] = { id, free: true }
+      continue
+    }
+    seen.add(id)
+    models.push({ id, free: true })
+  }
+  return { models, warnings: [] }
 }
 
 /**
@@ -450,7 +499,7 @@ export class ByokAdapter extends LlmAdapter {
     if (this.remoteModels === undefined || Date.now() - this.remoteModelsAt >= BYOK_MODELS_TTL_MS) {
       void this.ensureRemoteModels()
     }
-    return source.map(model => ({ id: model.id, name: model.id }))
+    return source.map(model => ({ id: model.id, name: byokModelLabel(model) }))
   }
 
   /** 模型目录（受黑名单过滤 + 账号门控）。 */
@@ -465,7 +514,7 @@ export class ByokAdapter extends LlmAdapter {
       .map(model => ({
         provider: BYOK.id,
         id: model.id,
-        name: model.id,
+        name: byokModelLabel(model),
         inputModalities: this.inputModalitiesFor(model.id),
       }))
   }

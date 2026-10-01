@@ -78,6 +78,11 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   ⚠️ 它的模型目录**是自动刷新的**（TTL 5 分钟 + 账号指纹变更立即重拉 + 集合真变时
   `broadcastCatalogChanged(ctx)` 广播），与其余 13 个 provider 的「首个成功即永久缓存」
   **有意不同** —— 照抄别的适配器会把「平台上新模型 / 新贴一个 Key 都看不到」重新引进来。
+  ⚠️ 「免费」标记**只在平台自己报了价格**（`pricing.prompt/completion` 或
+  `input/output_token_price_per_m` 确凿为 `0`）或平台表的 `freeModels` 显式列出时才加；
+  **无标记的语义是「未知」，绝不能反推成收费或免费**。`freeModels` 只收实测
+  `POST /chat/completions`（`max_tokens:1`）返回 2xx 的 id（智谱的
+  `glm-4-flash` 系列能调但 `/models` 不下发，不配就只剩收费模型）。
   详见 [byok 分册](docs/agents/byok.md)。
 
 - **包名**：`dsh-codearts-auth`

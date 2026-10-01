@@ -6,6 +6,7 @@ import {
   byokHeaders,
   isByokExpired,
   parseByokCredential,
+  parseByokFreeModelIds,
   parseByokModelList,
 } from '../../src/byok.js'
 import {
@@ -13,6 +14,7 @@ import {
   BYOK_PLATFORMS,
   byokBaseUrlLooksValid,
   byokChatUrl,
+  byokFreeModelsForPlatform,
   byokModelsUrl,
   byokPlatformById,
   byokResolveBaseUrl,
@@ -62,6 +64,31 @@ describe('BYOK 平台表', () => {
   it('byokPlatformById 未命中返回 undefined 而不是抛错', () => {
     expect(byokPlatformById('zhipu')?.label).toBe('智谱 GLM（开放平台）')
     expect(byokPlatformById('nope-not-a-platform')).toBeUndefined()
+  })
+
+  it('freeModels 只出现在有 baseUrl 的平台，且 id 无空白、无重复', () => {
+    for (const platform of BYOK_PLATFORMS) {
+      if (platform.freeModels === undefined) continue
+      expect(platform.id === 'custom', `${platform.id} 不能配 freeModels`).toBe(false)
+      expect(platform.freeModels.length, platform.id).toBeGreaterThan(0)
+      expect(new Set(platform.freeModels).size, platform.id).toBe(platform.freeModels.length)
+      for (const id of platform.freeModels) {
+        expect(id, platform.id).toBe(id.trim())
+        expect(id.length, platform.id).toBeGreaterThan(0)
+      }
+    }
+  })
+
+  it('⚠️ 智谱的免费模型必须配在表里：/models 只列计费模型，不配就只剩收费模型', () => {
+    // 实测依据：余额为 0 的账号打 glm-4-flash / glm-4.5-flash / glm-z1-flash
+    // 都是 200，而 /models 里的 glm-4.5 ~ glm-5.3 全部 429（code 1113）。
+    expect(byokFreeModelsForPlatform('zhipu')).toContain('glm-4-flash')
+    expect(byokFreeModelsForPlatform('zhipu')).toContain('glm-4.5-flash')
+  })
+
+  it('byokFreeModelsForPlatform：未命中平台 / 没配的平台返回空数组而不是 undefined', () => {
+    expect(byokFreeModelsForPlatform('nope-not-a-platform')).toEqual([])
+    expect(byokFreeModelsForPlatform('openrouter')).toEqual([])
   })
 
   it('byokResolveBaseUrl：预设平台用表里的地址（忽略前端传值）', () => {
@@ -142,6 +169,80 @@ describe('BYOK 模型目录解析', () => {
     expect(parseByokModelList(null)).toEqual([])
     expect(parseByokModelList('nope')).toEqual([])
     expect(parseByokModelList({ object: 'list' })).toEqual([])
+  })
+})
+
+describe('BYOK 免费模型判定', () => {
+  it('OpenRouter 的 pricing.prompt/completion 全为 "0" 判为免费', () => {
+    expect([...parseByokFreeModelIds({
+      data: [
+        { id: 'apodex/apodex-1.1-mini:free', pricing: { prompt: '0', completion: '0' } },
+        { id: 'unbiased/pareto', pricing: { prompt: '0.0000008', completion: '0.0000032' } },
+      ],
+    })]).toEqual(['apodex/apodex-1.1-mini:free'])
+  })
+
+  it('⚠️ pricing 里的哨兵值 -1（image 不适用）不得被当成免费', () => {
+    // 只看 prompt/completion；若改成「整个 pricing 对象全是 0」会在这里误判。
+    expect([...parseByokFreeModelIds({
+      data: [{ id: 'paid', pricing: { prompt: '0.000001', completion: '0.000002', image: '-1' } }],
+    })]).toEqual([])
+    expect([...parseByokFreeModelIds({
+      data: [{ id: 'odd', pricing: { prompt: '-1', completion: '-1' } }],
+    })]).toEqual([])
+  })
+
+  it('Novita 的 input/output_token_price_per_m 双 0 判为免费', () => {
+    expect([...parseByokFreeModelIds({
+      data: [
+        { id: 'bunny', input_token_price_per_m: 0, output_token_price_per_m: 0 },
+        { id: 'paid', input_token_price_per_m: 1500, output_token_price_per_m: 5000 },
+      ],
+    })]).toEqual(['bunny'])
+  })
+
+  it('⚠️ Novita 的 pricing 是嵌套对象，Number({}) 为 NaN ⇒ 不误判', () => {
+    expect([...parseByokFreeModelIds({
+      data: [{
+        id: 'zai-org/glm-5.3-flash',
+        input_token_price_per_m: 1500,
+        output_token_price_per_m: 5000,
+        pricing: { prompt: { price_per_m: 1500 }, completion: { price_per_m: 5000 } },
+      }],
+    })]).toEqual([])
+  })
+
+  it('只给一个价格字段（或字段缺失）时**不判免费** —— 缺失是未知，不是 0', () => {
+    expect([...parseByokFreeModelIds({
+      data: [
+        { id: 'only-input', input_token_price_per_m: 0 },
+        { id: 'only-output', output_token_price_per_m: 0 },
+        { id: 'none' },
+      ],
+    })]).toEqual([])
+  })
+
+  it('显式 is_free / free 为 true 才认（false 与缺省都不认）', () => {
+    expect([...parseByokFreeModelIds({
+      data: [{ id: 'a', is_free: true }, { id: 'b', free: true }, { id: 'c', is_free: false }, { id: 'd', free: 'true' }],
+    })]).toEqual(['a', 'b'])
+  })
+
+  it('⚠️ 智谱式目录（只有 id/object/created/owned_by）一个都不标', () => {
+    // 这正是用户看到「全是收费的」的数据根因：接口根本不下发价格。
+    expect([...parseByokFreeModelIds({
+      object: 'list',
+      data: [
+        { id: 'glm-4.5', object: 'model', created: 1753632000, owned_by: 'z-ai' },
+        { id: 'glm-5.3', object: 'model', created: 1753632000, owned_by: 'z-ai' },
+      ],
+    })]).toEqual([])
+  })
+
+  it('裸字符串条目没有价格信息 ⇒ 不标；非对象入参回空集合（不抛错）', () => {
+    expect([...parseByokFreeModelIds({ models: ['llama3:8b'] })]).toEqual([])
+    expect([...parseByokFreeModelIds(null)]).toEqual([])
+    expect([...parseByokFreeModelIds('nope')]).toEqual([])
   })
 })
 

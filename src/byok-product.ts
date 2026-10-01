@@ -59,6 +59,20 @@ export interface ByokPlatform {
    * 仅用于面板文案与测试断言，**不参与鉴权逻辑** —— 带 Key 的请求一律正常发。
    */
   publicCatalog?: boolean
+  /**
+   * 平台**不下发但确实能调**的免费模型（会与 `/models` 的结果按 id 合并）。
+   *
+   * ⚠️ 这个字段存在的唯一理由：`/models` 只列**计费**模型。智谱的
+   * `glm-4-flash` / `glm-4.5-flash` / `glm-z1-flash` 长期免费，却**不在**
+   * `GET https://open.bigmodel.cn/api/paas/v4/models` 的 11 个条目里
+   * （实测：该接口只给 glm-4.5 ~ glm-5.3 系列）⇒ 用户余额为 0 时，
+   * 插件里看到的**全是收费模型**，于是「是不是全收费？」成为必然的误解。
+   *
+   * 维护约定：**只加实测过 `POST /chat/completions`（`max_tokens:1`）
+   * 返回 2xx 的 id**，不加「文档说免费」的 id。宁可少列（用户仍可在
+   * `自定义` 里手填 base url），不可列错 —— 列错会让请求直接 4xx。
+   */
+  freeModels?: readonly string[]
 }
 
 /**
@@ -74,6 +88,8 @@ export const BYOK_PLATFORMS: readonly ByokPlatform[] = Object.freeze([
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     consoleUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
     note: '国际站同一 Key 可用：api.z.ai/api/paas/v4',
+    // 实测（余额为 0 的账号）：这三个 200，而 /models 里的 glm-4.5 ~ glm-5.3 全部 429/1113。
+    freeModels: ['glm-4-flash', 'glm-4.5-flash', 'glm-z1-flash'],
   },
   {
     id: 'dashscope',
@@ -257,6 +273,16 @@ export const BYOK = Object.freeze({
 /** 按 id 取平台；未命中返回 `undefined`（**不抛错**，调用方决定如何报错）。 */
 export function byokPlatformById(id: string): ByokPlatform | undefined {
   return BYOK_PLATFORMS.find(platform => platform.id === id)
+}
+
+/**
+ * 该平台**已知免费但 `/models` 不下发**的模型 id。
+ *
+ * 未命中平台 / 平台没配 `freeModels` 时返回空数组（不是 `undefined`）——
+ * 调用方直接 `for (... of ...)` 展开，省一次空值判断。
+ */
+export function byokFreeModelsForPlatform(platformId: string): readonly string[] {
+  return byokPlatformById(platformId)?.freeModels ?? []
 }
 
 /**
