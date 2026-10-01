@@ -32,6 +32,31 @@ const STYLES = `
 .dim-jh-providerIcon.trae { background: white; }
 /* Raccoon Work（商汤）：官方图标是深蓝底白色面具，白底容器中显示清晰。 */
 .dim-jh-providerIcon.raccoon { background: white; }
+/* BYOK（自备 Key）：图标是灰底白钥匙的中性图形，白底容器保持与其他图标一致的圆角观感。 */
+.dim-jh-providerIcon.byok { background: white; }
+
+/* BYOK 的「粘贴 API Key」表单（新建账号弹窗内联，不另开浏览器窗口）。 */
+.dim-jh-keyForm { display: grid; gap: 10px; margin-top: 4px; }
+.dim-jh-keyForm label { display: grid; gap: 4px; font-size: 12px; color: var(--dsw-alias-label-secondary, #555); }
+.dim-jh-keyForm select,
+.dim-jh-keyForm input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--dsw-alias-border-l2, #d0d5dd);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+}
+.dim-jh-keyForm input[type="password"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* 平台说明（含控制台链接）：帮助用户知道「去哪拿 Key」。 */
+.dim-jh-keyHint { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary, #888); }
+.dim-jh-keyHint a { color: var(--dsw-alias-label-link, #3b82f6); }
+/* 校验失败的红色提示（复用既有 notice 的间距语言）。 */
+.dim-jh-keyError { color: var(--dsw-alias-label-error, #d92d20); font-size: 12px; line-height: 18px; }
+/* 校验中 / 成功态的绿色提示。 */
+.dim-jh-keyOk { color: var(--dsw-alias-label-success, #12805c); font-size: 12px; line-height: 18px; }
 
 /* provider 文案：align dsh-im .dim-channelCopy */
 .dim-jh-providerLabel { min-width: 0; display: grid; }

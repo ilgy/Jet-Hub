@@ -103,6 +103,18 @@ export const CREDITS_CAPABILITIES = Object.freeze({
   loomy: Object.freeze({ balance: true, dailyCheckin: true, onboardingTasks: true }),
   // Raccoon Work（商汤小浣熊）：余额 + **一次性**登录奖励。
   raccoon: Object.freeze({ balance: true, onboardingTasks: true }),
+  // BYOK（用户自备 API Key）：**两项都没有**，且是刻意的负能力登记。
+  //
+  // 与其它 provider 的根本差异：BYOK 的额度由**用户自己接的那个平台**决定，
+  // 本插件既没有该平台的账号体系，也不知道其计费口径 —— 智谱看余额、
+  // 硅基流动看余额、OpenRouter 看 credits、Groq 看速率窗口，字段与端点
+  // 各不相同。若在这里猜一个端点，只会得到「每次打开面板都发一个必然
+  // 失败的请求」。
+  //
+  // ⚠️ 这也是 BYOK 与其余 13 个 provider 的定位差别：那 13 个是「官方
+  // 客户端渠道，插件模拟它签到拿积分」，BYOK 是「把用户已有的 Key 接进来
+  // 用」。故这里登记 false 不是「还没实现」，而是**能力边界**。
+  byok: Object.freeze({ balance: false, dailyCheckin: false }),
 });
 
 /**

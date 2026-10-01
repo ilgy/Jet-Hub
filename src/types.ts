@@ -125,11 +125,45 @@ export interface RpcCreateAccountResponse {
    *
    * - `'url'`（或缺省）：前端 `window.open(loginUrl)` 并轮询 `login.poll`。
    * - `'sms'`：前端渲染手机号 + 验证码表单，走 `login.sendSms` / `login.submitSms`。
+   * - `'key'`：前端渲染「选择平台 + 粘贴 API Key」表单，走 `login.submitKey`。
+   *   同样 `loginUrl` 为空串（没有可打开的登录页）。
    *
    * ⚠️ **缺省必须视为 `'url'`**：既有 7 个 provider 不传该字段，
    * 行为必须逐字节不变。
    */
-  loginMode?: 'url' | 'sms'
+  loginMode?: 'url' | 'sms' | 'key'
+  /**
+   * BYOK 预设平台清单（**仅 `loginMode === 'key'` 时下发**）。
+   *
+   * 由服务端 `BYOK_PLATFORMS` 表生成，而不是让客户端自己抄一份：
+   *
+   * 1. 那张表的每个 `baseUrl` 都经过「候选路径 vs 随机路径」对照组实测校正
+   *    （见 `src/byok-product.ts` 头注释），客户端再抄一份必然逐渐漂移；
+   * 2. 客户端 bundle 是独立 esbuild 产物，**import 不到 TS 源码**，
+   *    想共用就只能复制粘贴 —— 而复制粘贴会绕开表里那些校正结论；
+   * 3. 服务端本来就掌握平台解析权（`login.submitKey` 只对 `custom`
+   *    采信前端传的 `baseUrl`），下发清单与之一致，前端不可能配错地址。
+   */
+  platforms?: readonly RpcByokPlatform[]
+}
+
+/**
+ * BYOK 预设平台（面板下拉项）。
+ *
+ * ⚠️ 这里**故意不含任何凭据**：清单是公开的平台元数据，
+ * 用户的 Key 直到 `login.submitKey` 才第一次出现，且只向后端单向传递。
+ */
+export interface RpcByokPlatform {
+  /** 平台 id，原样回传 `login.submitKey`。 */
+  id: string
+  /** 下拉展示名。 */
+  label: string
+  /** 该平台的 OpenAI 兼容 base url（仅供展示，不可编辑）。 */
+  baseUrl: string
+  /** 建 Key 的控制台地址（面板给出「去哪儿拿 Key」的链接）。 */
+  consoleUrl: string
+  /** 额外提示（展示在下拉下方，如「新用户每个模型 50 万 tokens」）。 */
+  note?: string
 }
 
 export interface RpcPollLoginRequest {
@@ -380,6 +414,47 @@ export interface RpcSubmitSmsResponse {
   done: boolean
   /** 失败原因（`done: false` 时给出）。 */
   error?: string
+}
+
+/**
+ * ========================================
+ * API Key 粘贴登录（仅 BYOK）
+ * ========================================
+ *
+ * BYOK 是唯一**既无 loginUrl 也无验证码**的渠道：凭据就是用户自己
+ * 从第三方平台控制台复制的 API Key，故需要一个「提交 Key」端点。
+ *
+ * ⚠️ 与 `login.submitSms` 的关键差异：本端点会**先向远端的
+ * `GET {baseUrl}/models` 校验 Key**，只有校验通过才写凭据 ——
+ * 避免把打不通的 Key 存进账号池，让用户面对一个「账号在、模型全空、
+ * 报错信息与真实原因无关」的黑洞（2026-10-01 实测智谱时确认该端点
+ * 对无效 Key 返回 401，可作可靠判据）。
+ */
+
+/** RPC: 提交 API Key 完成 BYOK 账号创建。 */
+export interface RpcSubmitKeyRequest {
+  accountId: string
+  provider: string
+  /** 预设平台 id（见 `src/byok-product.ts` 的 `BYOK_PLATFORMS`）。 */
+  platform: string
+  /** 用户粘贴的 API Key（**原样传递**，不做前缀增删）。 */
+  apiKey: string
+  /**
+   * 自定义 base url（**仅 `platform === 'custom'` 时使用**）。
+   *
+   * 预设平台忽略此字段 —— 端点以表里的 `baseUrl` 为准，避免前端篡改
+   * 让凭据落进一个与展示平台不符的地址。
+   */
+  baseUrl?: string
+}
+/** RPC: 提交 Key 的响应。 */
+export interface RpcSubmitKeyResponse {
+  /** 凭据是否已写入。 */
+  done: boolean
+  /** 失败原因（`done: false` 时给出，可直接展示给用户）。 */
+  error?: string
+  /** 校验通过后从 `GET /models` 拉到的模型数量（用于成功提示）。 */
+  modelCount?: number
 }
 
 /**

@@ -22,6 +22,7 @@ import { LOBSTERAI } from '../lobsterai-product.js'
 import { QODER, QODER_CN } from '../qoder-product.js'
 import { TRAE, TRAE_INTL } from '../trae-product.js'
 import { CLINE } from '../cline-product.js'
+import { BYOK, BYOK_PLATFORMS } from '../byok-product.js'
 import { isLobsteraiRefreshable, lobsteraiCredentialExpiresAtMs } from '../lobsterai.js'
 import { fetchQoderUserNickname, isQoderRefreshable, qoderCredentialExpiresAtMs, withQoderNickname } from '../qoder.js'
 import { isTraeRefreshable, traeCredentialExpiresAtMs } from '../trae.js'
@@ -35,7 +36,7 @@ import type { RpcResult, JetHubRpcContext, JetHubRpcServices, JetHubRegionRoutin
 
 /** `account.*` 端点处理器所需依赖（由 `src/jet-hub-rpc.ts` 装配）。 */
 export type AccountEndpointDeps = JetHubRpcContext
-  & Pick<JetHubRpcServices, 'codearts' | 'buddy' | 'buddyIntl' | 'workbuddy' | 'workbuddyCn' | 'lobsterai' | 'qoder' | 'qoderCn' | 'trae' | 'traeIntl' | 'cline' | 'loomy' | 'raccoon'>
+  & Pick<JetHubRpcServices, 'codearts' | 'buddy' | 'buddyIntl' | 'workbuddy' | 'workbuddyCn' | 'lobsterai' | 'qoder' | 'qoderCn' | 'trae' | 'traeIntl' | 'cline' | 'loomy' | 'raccoon' | 'byok'>
   & Pick<JetHubRegionRouting, 'buddyAuthForProduct' | 'qoderAuthForProduct' | 'traeAuthForProduct' | 'isQoderProvider' | 'isTraeProvider'>
   & Pick<JetHubCredentialHelpers, 'shortId' | 'parseBuddyCredential' | 'parseCodeArtsCredential' | 'parseLobsteraiCredential' | 'parseQoderCredential' | 'parseTraeCredential' | 'parseClineCredential' | 'buildRaccoonNickname'>
 
@@ -47,7 +48,7 @@ export async function handleAccountMethod(
   _signal: AbortSignal,
 ): Promise<RpcResult> {
   const { ctx, pool, codearts, buddy, buddyIntl, workbuddy, workbuddyCn, lobsterai, qoder,
-    qoderCn, trae, traeIntl, cline, loomy, raccoon, buddyAuthForProduct,
+    qoderCn, trae, traeIntl, cline, loomy, raccoon, byok, buddyAuthForProduct,
     qoderAuthForProduct, traeAuthForProduct, isQoderProvider, isTraeProvider, shortId,
     parseBuddyCredential, parseCodeArtsCredential, parseLobsteraiCredential,
     parseQoderCredential, parseTraeCredential, parseClineCredential, buildRaccoonNickname, } = deps
@@ -401,6 +402,57 @@ export async function handleAccountMethod(
           })
 
           return { ok: true, value: { accountId: id, loginUrl: raccoonStarted.loginUrl } }
+        } else if (provider === BYOK.id) {
+          // BYOK（Bring Your Own Key）：**唯一没有登录页也没有验证码**的渠道。
+          // 凭据就是用户从第三方平台控制台复制的 API Key，故这里只登记
+          // **占位条目**并立刻返回 `loginMode:'key'`，前端据此渲染
+          // 「选择平台 + 粘贴 Key」表单，随后调 `login.submitKey` 完成写入。
+          //
+          // ⚠️ **绝不能复用 `startLogin` 形状**：BYOK 没有 `loginUrl` 可弹
+          //   （返回空串），前端若按 `'url'` 处理会走到
+          //   「后端未返回登录地址」的错误分支。
+          //
+          // ⚠️ 这里**不校验 Key**（没有 Key 可校验），也不做任何网络请求；
+          //   校验发生在 `login.submitKey`，且必须先校验再写凭据 ——
+          //   否则会留下「账号在、模型全空、报错与真实原因无关」的黑洞。
+          //
+          // ⚠️ 与 raccoon 一样先登记占位条目，使前端 `login.poll` 能立即
+          //   看到该账号；`submitKey` 成功后回填昵称与模型集。若用户中途
+          //   关闭弹窗，占位条目会留在池里（无凭据）—— 这是**刻意**的：
+          //   它给了用户「重新粘贴」的落脚点（`login.poll` 判据是
+          //   「凭据能否解析」，无凭据即仍未登录），与 Loomy 短信登录
+          //   「失败不删占位」的既有取舍一致。
+          await pool.addAccount({
+            id,
+            provider: BYOK.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            // ⚠️ BYOK **恒不可续期**：Key 是用户手工粘贴的，插件无从续期，
+            //   过期只能重新粘贴。这也是 `refreshAll()` 不会碰它的原因。
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+
+          return {
+            ok: true,
+            value: {
+              accountId: id,
+              loginUrl: '',
+              loginMode: 'key' as const,
+              // 平台清单由**服务端下发**，而不是让客户端自己抄一份
+              // （理由见 `RpcCreateAccountResponse.platforms` 的注释）。
+              // ⚠️ 这里只发 id / 展示名 / base url / 控制台地址 / 备注，
+              //   **不含任何凭据**：清单是公开平台元数据。
+              platforms: BYOK_PLATFORMS.map(platform => ({
+                id: platform.id,
+                label: platform.label,
+                baseUrl: platform.baseUrl,
+                consoleUrl: platform.consoleUrl,
+                ...platform.note === undefined ? {} : { note: platform.note },
+              })),
+            },
+          }
         } else {
           return { ok: false, error: { code: 'bad-request', message: `unknown provider: ${provider}` } }
         }
@@ -506,6 +558,15 @@ export async function handleAccountMethod(
               // 账号池，否则 UI 一直显示「已过期」（真实缺陷：JWT 已续到 15:09、
               // 账号池仍是 12:02，相差 3.1 小时，但功能完全正常）。
               await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id)
+              break
+            case BYOK.id:
+              // ⚠️ BYOK **没有** refresh 端点，也没有 refresh_token 可轮换：
+              // Key 是用户手工粘贴的「长期凭据」，插件无从续期。这里只能做
+              // **有效性探测**（打一次 `GET /models`），失效时抛「请重新粘贴」。
+              // 与 Loomy 同型，与 raccoon 的「真续期」相反。
+              // ⚠️ 探测成功也不改写凭据（无 expires_in 可写，平白一次写盘会
+              // 制造「凭据被刷新过」的假象）。见 ByokAuth.refreshAccountCredential。
+              await byok.refreshAccountCredential(entry.credentialRef)
               break
             default:
               throw new Error(`Unknown provider: ${entry.provider}`)

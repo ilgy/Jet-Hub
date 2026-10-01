@@ -35,6 +35,7 @@ import type { TraeAuth } from './trae-auth.js'
 import type { ClineAuth } from './cline-auth.js'
 import type { LoomyAuth } from './loomy-auth.js'
 import type { RaccoonAuth } from './raccoon-auth.js'
+import type { ByokAuth } from './byok-auth.js'
 import type { RaccoonCredential } from './raccoon.js'
 import { QODER, QODER_CN } from './qoder-product.js'
 import { TRAE, TRAE_INTL } from './trae-product.js'
@@ -537,6 +538,14 @@ export interface JetHubRpcServices {
   loomy: LoomyAuth
   raccoon: RaccoonAuth
   /**
+   * BYOK（用户自备 API Key）认证服务。
+   *
+   * ⚠️ 它**不是**一个「登录式」provider：没有 `startLogin()`，凭据由用户在
+   * 前端弹窗里粘贴，经 `login.submitKey` 校验后写入。`account.create` 对它
+   * 只建占位条目（`loginMode: 'key'`），不发任何网络请求。
+   */
+  byok: ByokAuth
+  /**
    * 适配器实例映射（`provider → listAllModels()` 来源）。
    *
    * ⚠️ `ctx.llm` **不透传自定义方法**，故必须由 `index.ts` 收集实例后传进来，
@@ -722,6 +731,7 @@ function registerJetHubEndpoints(
     cline: services.cline,
     loomy: services.loomy,
     raccoon: services.raccoon,
+    byok: services.byok,
     modelAdapters: services.modelAdapters,
     buddyAuthForProduct,
     qoderAuthForProduct,

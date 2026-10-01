@@ -6,7 +6,10 @@
  * 时炸出 `Unknown provider: xxx`。历史上已经踩过两次：
  *
  * 1. `workbuddy` 分支缺失（原实现只判 codearts / buddy）；
- * 2. `buddy-intl` / `workbuddy-cn` 分支缺失（`CODEBUDDY_INTL.id` / `WORKBUDDY_CN.id`）。
+ * 2. `buddy-intl` / `workbuddy-cn` 分支缺失（`CODEBUDDY_INTL.id` / `WORKBUDDY_CN.id`）；
+ * 3. `byok` 分支缺失（加 BYOK provider 时漏了 `account.refresh` 的 switch ——
+ *    它没有真正意义上的「续期」，但**仍然必须**有一条分支走有效性探测，
+ *    否则账号卡片的「刷新」按钮会抛 `Unknown provider: byok`）。
  *
  * 本文件不再逐个 `it(...)` 手抄 provider 名，而是：
  * - 从 `plugin-src/client/jet-hub.js` 的 PROVIDERS 列表**派生** id 集合（唯一真相源）；
@@ -52,6 +55,7 @@ const RPC_SERVICE_FIELD: Record<string, keyof JetHubRpcServices> = {
   cline: 'cline',
   loomy: 'loomy',
   raccoon: 'raccoon',
+  byok: 'byok',
 }
 
 /** 从客户端源码派生 provider id 集合（与面板列表同一真相源）。 */
@@ -133,6 +137,10 @@ async function callRefresh(
     cline: makeServiceStub('cline', calls) as never,
     loomy: makeServiceStub('loomy', calls) as never,
     raccoon: makeServiceStub('raccoon', calls) as never,
+    // BYOK 没有 refresh 端点：这个替身的 `refreshAccountCredential` 语义是
+    // **有效性探测**（打一次 `GET /models`），但对外仍是同一个入口 ——
+    // 故它同样必须出现在这张表里，否则「刷新」按钮会抛 `Unknown provider: byok`。
+    byok: makeServiceStub('byok', calls) as never,
   })
   const response = await handler!(new Request('http://127.0.0.1/api/jet-hub', {
     method: 'POST',

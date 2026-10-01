@@ -38,6 +38,7 @@ function stubServices(overrides: Partial<JetHubRpcServices> = {}): JetHubRpcServ
     cline: {} as never,
     loomy: {} as never,
     raccoon: {} as never,
+    byok: {} as never,
     ...overrides,
   }
 }
