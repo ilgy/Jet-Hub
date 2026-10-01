@@ -80,10 +80,30 @@ describe('BYOK 平台表', () => {
   })
 
   it('⚠️ 智谱的免费模型必须配在表里：/models 只列计费模型，不配就只剩收费模型', () => {
-    // 实测依据：余额为 0 的账号打 glm-4-flash / glm-4.5-flash / glm-z1-flash
-    // 都是 200，而 /models 里的 glm-4.5 ~ glm-5.3 全部 429（code 1113）。
-    expect(byokFreeModelsForPlatform('zhipu')).toContain('glm-4-flash')
-    expect(byokFreeModelsForPlatform('zhipu')).toContain('glm-4.5-flash')
+    // 实测依据：余额为 0 的账号打下面这 8 个都是 200（max_tokens:1），
+    // 而 /models 里的 glm-4.5 ~ glm-5.3 全部 429（code 1113）。
+    const free = byokFreeModelsForPlatform('zhipu')
+    for (const id of [
+      'glm-4-flash',
+      'glm-4-flash-250414',
+      'glm-4.5-flash',
+      'glm-z1-flash',
+      'glm-4v-flash',
+      'glm-4.1v-thinking-flash',
+      'glm-4.6v-flash',
+      'glm-4.7-flash',
+    ]) {
+      expect(free, id).toContain(id)
+    }
+  })
+
+  it('⚠️ 智谱的计费同族型号不得混进 freeModels（列错会让请求直接 4xx）', () => {
+    // 实测：-flashx / -airx 是计费型号（429/1113），glm-5.x-flash 系列
+    // 是 400/1211「模型不存在」。
+    const free = byokFreeModelsForPlatform('zhipu')
+    for (const id of ['glm-4-flashx', 'glm-4.5-flashx', 'glm-z1-flashx', 'glm-4.5-airx', 'glm-4-airx', 'glm-5-flash', 'glm-5.3-flash', 'glm-4.6-flash']) {
+      expect(free, id).not.toContain(id)
+    }
   })
 
   it('byokFreeModelsForPlatform：未命中平台 / 没配的平台返回空数组而不是 undefined', () => {

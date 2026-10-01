@@ -304,7 +304,8 @@ cost / billing / quota 任何一个字段。所以「列表里没有免费标记
 POST /chat/completions  max_tokens:1
 glm-4.5 / 4.5-air / 4.6 / 4.7 / glm-5 / 5-turbo / 5.1 / 5.2 / 5.3 / 5.3-flash / 5.3-flashx
   → 全部 429 {"error":{"code":"1113","message":"余额不足或无可用资源包,请充值。"}}
-glm-4-flash / glm-4.5-flash / glm-4-flash-250414 / glm-z1-flash
+glm-4-flash / glm-4-flash-250414 / glm-4.5-flash / glm-z1-flash /
+glm-4v-flash / glm-4.1v-thinking-flash / glm-4.6v-flash / glm-4.7-flash
   → 全部 200（同样余额 0）
 ```
 
@@ -312,6 +313,17 @@ glm-4-flash / glm-4.5-flash / glm-4-flash-250414 / glm-z1-flash
 故 `ByokPlatform` 多了 `freeModels?: readonly string[]`（`src/byok-product.ts`），
 `loadByokModels` 把它**合并**进目录：接口已列出的就地补 `free: true`（顺序不变），
 没列出的追加在末尾。
+
+⚠️ 失败模式有**两种**，都要靠枚举候选集排除：
+
+| 实测结果 | 含义 | 不能列入 `freeModels` |
+| --- | --- | --- |
+| `429` `code=1113` | 模型存在，但你余额不够 ⇒ **计费**型号 | ✓（如 `glm-4-flashx`、`glm-z1-flashx`、`glm-4.5-airx`、`glm-4.7-flashx`） |
+| `400` `code=1211` | 「模型不存在，请检查模型代码」 ⇒ id 写错了 | ✓（如 `glm-5-flash`、`glm-5.3-flash` 之外的 `glm-5.x-flash`、`glm-4.6-flashx`） |
+| `403` `code=1220` | 「您无权访问」 ⇒ 存在但你账号无权 | ✓（如 `glm-4.6-flash`） |
+
+⚠️ **不能按名字猜**：`glm-4.7-flash` 免费，而 `glm-4.6-flash` 是 403、`glm-4.7-flashx`
+是 429 —— 同族名字的免费与否没有规律，只能逐个实打。
 
 维护约定：**只加实测过 `POST /chat/completions`（`max_tokens:1`）返回 2xx 的 id**，
 不加「文档说免费」的 id。宁可少列（用户仍可在「自定义」里手填 base url），不可列错

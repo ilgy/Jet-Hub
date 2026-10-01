@@ -7,7 +7,7 @@ import {
   type ByokAdapterOptions,
 } from '../../src/byok-adapter.js'
 import { buildByokCredential, type ByokCredential } from '../../src/byok.js'
-import { BYOK } from '../../src/byok-product.js'
+import { BYOK, byokFreeModelsForPlatform } from '../../src/byok-product.js'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 
 /**
@@ -622,12 +622,18 @@ describe('loadByokModels', () => {
 
   it('⚠️ 接口已经列出免费 id 时**就地**补 free 标记（不重复、不改位置）', async () => {
     const loaded = await loadByokModels(cred, fetcher(200, '{"data":[{"id":"glm-5.3"},{"id":"glm-4-flash"}]}'))
-    expect(loaded.models).toEqual([
-      { id: 'glm-5.3' },
-      { id: 'glm-4-flash', free: true },
-      { id: 'glm-4.5-flash', free: true },
-      { id: 'glm-z1-flash', free: true },
-    ])
+    const ids = loaded.models.map(m => m.id)
+    // 接口给的顺序不能被表打乱：glm-5.3 仍在最前，glm-4-flash 仍在第二位。
+    expect(ids.slice(0, 2)).toEqual(['glm-5.3', 'glm-4-flash'])
+    // 表里的每个免费 id 都必须出现且恰好一次（就地补标记 + 其余追加到末尾）。
+    for (const id of byokFreeModelsForPlatform('zhipu')) {
+      expect(ids.filter(x => x === id), id).toHaveLength(1)
+    }
+    expect(ids).toHaveLength(1 + byokFreeModelsForPlatform('zhipu').length)
+    // 已在接口列表里的就地补，没列出的追加；两边都带 free。
+    for (const m of loaded.models) {
+      if (m.id !== 'glm-5.3') expect(m.free, m.id).toBe(true)
+    }
   })
 
   it('非 2xx 时抛出「状态码 + 远端明细」的文案（要能直接给用户看）', async () => {

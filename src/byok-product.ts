@@ -62,8 +62,8 @@ export interface ByokPlatform {
   /**
    * 平台**不下发但确实能调**的免费模型（会与 `/models` 的结果按 id 合并）。
    *
-   * ⚠️ 这个字段存在的唯一理由：`/models` 只列**计费**模型。智谱的
-   * `glm-4-flash` / `glm-4.5-flash` / `glm-z1-flash` 长期免费，却**不在**
+   * ⚠️ 这个字段存在的唯一理由：`/models` 只列**计费**模型。智谱那一批
+   * `*-flash` 长期免费，却**不在**
    * `GET https://open.bigmodel.cn/api/paas/v4/models` 的 11 个条目里
    * （实测：该接口只给 glm-4.5 ~ glm-5.3 系列）⇒ 用户余额为 0 时，
    * 插件里看到的**全是收费模型**，于是「是不是全收费？」成为必然的误解。
@@ -71,6 +71,7 @@ export interface ByokPlatform {
    * 维护约定：**只加实测过 `POST /chat/completions`（`max_tokens:1`）
    * 返回 2xx 的 id**，不加「文档说免费」的 id。宁可少列（用户仍可在
    * `自定义` 里手填 base url），不可列错 —— 列错会让请求直接 4xx。
+   * 同族的 `*-flashx` / `*-airx` 是**计费**型号，实测 429/1113，不得混入。
    */
   freeModels?: readonly string[]
 }
@@ -88,8 +89,19 @@ export const BYOK_PLATFORMS: readonly ByokPlatform[] = Object.freeze([
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     consoleUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
     note: '国际站同一 Key 可用：api.z.ai/api/paas/v4',
-    // 实测（余额为 0 的账号）：这三个 200，而 /models 里的 glm-4.5 ~ glm-5.3 全部 429/1113。
-    freeModels: ['glm-4-flash', 'glm-4.5-flash', 'glm-z1-flash'],
+    // 实测（余额为 0 的账号，max_tokens:1）：这 8 个 200，而 /models 里的
+    // glm-4.5 ~ glm-5.3 全部 429/1113。同族 -flashx / -airx / glm-5.x-flash
+    // 分别实测 429 与 400/1211，故不列入。
+    freeModels: [
+      'glm-4-flash',
+      'glm-4-flash-250414',
+      'glm-4.5-flash',
+      'glm-z1-flash',
+      'glm-4v-flash',
+      'glm-4.1v-thinking-flash',
+      'glm-4.6v-flash',
+      'glm-4.7-flash',
+    ],
   },
   {
     id: 'dashscope',
