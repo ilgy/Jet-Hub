@@ -74,6 +74,62 @@ function clampByokMaxTokens(value: number | undefined): number | undefined {
 }
 
 /**
+ * 模型目录缓存有效期（毫秒）。
+ *
+ * ⚠️ 与其余适配器（cline / buddy / trae / lobsterai 一律是**首个成功结果
+ * 永久缓存**）有意不同。BYOK 的目录有两个随时会变的来源，永久缓存会直接
+ * 表现为用户报障「平台上了新模型，插件里看不到，重启才出现」：
+ *
+ * 1. 平台自己上新（智谱一年内从 glm-4.5 走到 glm-5.3 一整代）；
+ * 2. **用户在插件里新增 / 删除账号** —— 第二个账号往往是别的平台，
+ *    它的模型必须立刻出现在同一个 `byok` 路由下。
+ *
+ * 取 5 分钟：打开选择器这类高频读取几乎全部命中缓存，而新模型在一个
+ * TTL 内一定会自动出现。
+ */
+const BYOK_MODELS_TTL_MS = 5 * 60_000
+
+/**
+ * 目录拉取**失败**后的重试冷却（毫秒）。
+ *
+ * 只在「一次都没拉到模型」且「账号指纹没变」时生效：没有它，池里还没
+ * 账号 / Key 全错时，面板每渲染一次就是一轮网络请求。已经拿到过成功目录
+ * 时不启用冷却 —— TTL 本身就是节流，再叠一层会让「刚新增账号」被上一次
+ * 失败卡住 30 秒，那正是「更新不及时」的来源。
+ */
+const BYOK_MODELS_RETRY_MS = 30_000
+
+/**
+ * 目录指纹：账号 id + 各账号端点。
+ *
+ * `base_url` 参与而不仅是 id —— 同一个账号被换成另一个平台的 Key 时模型集
+ * 完全不同。排序后再拼，故拖拽调序（集合不变）不会误判成「账号变了」。
+ */
+function byokModelSignature(
+  items: readonly { accountId: string; credential: ByokCredential }[],
+): string {
+  return items
+    .map(item => `${item.accountId}@${item.credential.base_url}`)
+    .sort()
+    .join('|')
+}
+
+/**
+ * 两次目录的模型 id 集合是否相同（顺序无关）。
+ *
+ * 顺序无关是必须的：并集顺序随账号池顺序变，但那是**同一个目录**，
+ * 不该把用户界面上的列表推倒重来。
+ */
+function byokSameModelIds(a: readonly ByokModel[] | undefined, b: readonly ByokModel[]): boolean {
+  if (a === undefined || a.length !== b.length) return false
+  const left = new Set(a.map(model => model.id))
+  for (const model of b) {
+    if (!left.has(model.id)) return false
+  }
+  return true
+}
+
+/**
  * SSE 空闲超时（毫秒）。
  *
  * ⚠️ **必须在函数内读 env**：模块顶层常量会在 import 时定型，
@@ -134,6 +190,18 @@ export interface ByokAdapterOptions {
   fetchImpl?: typeof fetch
   /** 模型目录加载器覆盖（测试用）。 */
   loadModels?: (options: { credential: ByokCredential }) => Promise<{ models: ByokModel[]; warnings: string[] }>
+  /**
+   * 目录内容**发生变化**时的回调（新增或移除模型时触发一次）。
+   *
+   * 装配处绑到 `ctx.emit('llm/adapters-updated')`。没有它，自动刷新只更新了
+   * 服务端内存，而客户端的 `ModelCatalogDirectory` 在 `status === 'ready'` 时
+   * **短路返回缓存**、只在宿主事件上 `refresh()` ⇒ 用户仍然要重启才看得到
+   * 新模型（与「关闭模型」是同一处坑，见 `broadcastCatalogChanged`）。
+   *
+   * 只做通知，**不改变拓扑**（不增删 provider / adapter），故 dsh-llm 的
+   * invariant 监听不会误报。
+   */
+  onCatalogChanged?: () => void
 }
 
 /**
@@ -171,8 +239,18 @@ export async function loadByokModels(
  * 一个实例同时服务池中**全部** BYOK 账号（可能跨多个平台）。
  */
 export class ByokAdapter extends LlmAdapter {
-  /** 合并后的模型目录（首次成功后填充）。 */
+  /** 合并后的模型目录（**最后一次成功**的结果）。 */
   private remoteModels: ByokModel[] | undefined
+  /** 上一次成功填充目录的时间（{@link BYOK_MODELS_TTL_MS} 的基准）。 */
+  private remoteModelsAt = 0
+  /** 上一次尝试拉取的时间（失败冷却基准）。 */
+  private lastAttemptAt = 0
+  /** 上一次尝试是否**一个模型都没拉到**（决定是否启用冷却）。 */
+  private lastAttemptFailed = false
+  /** 上一次尝试对应的账号指纹（指纹变了就不吃冷却）。 */
+  private attemptedSignature: string | undefined
+  /** 上一次**成功**目录对应的账号指纹。 */
+  private remoteSignature: string | undefined
   /** 正在进行中的目录加载（避免并发重复请求）。 */
   private loading: Promise<void> | undefined
   /**
@@ -243,61 +321,135 @@ export class ByokAdapter extends LlmAdapter {
   /**
    * 加载全部账号的模型目录并合并（并缓存每账号的模型集）。
    *
-   * 缓存策略与 Cline 一致：首个**成功**结果填充 `remoteModels`，
-   * 之后不再请求；并发调用共享同一个 in-flight Promise。
+   * ⚠️ 缓存策略**不是**「首个成功即永久缓存」（cline / buddy / trae /
+   * lobsterai 才是那样）。这里每次调用都先算一次账号指纹与时间戳：
+   *
+   * - 指纹变了（新增 / 删除账号、某账号换了端点）⇒ **立即**重拉，不受 TTL 限制；
+   * - 只是过了 {@link BYOK_MODELS_TTL_MS} ⇒ 重拉（平台上新的模型自动出现）；
+   * - 都没变 ⇒ 直接用缓存，**一次网络都不打**。
+   *
+   * 并发调用共享同一个 in-flight Promise；拉取失败**保留旧目录**并进入
+   * {@link BYOK_MODELS_RETRY_MS} 冷却 —— 一次网络抖动不该让选择器里的模型
+   * 全没了，也不该让面板每次渲染都打一轮网络。
    */
   private async ensureRemoteModels(): Promise<void> {
-    if (this.remoteModels !== undefined) return
     if (this.loading !== undefined) {
       await this.loading
       return
     }
-    this.loading = (async () => {
-      try {
-        const credentials = await this.resolveAllCredentials()
-        const seen = new Set<string>()
-        const union: ByokModel[] = []
-        for (const { accountId, credential } of credentials) {
-          let models: ByokModel[]
-          try {
-            const loaded = await (this.options.loadModels ?? (async (o: { credential: ByokCredential }) =>
-              loadByokModels(o.credential, this.fetchImpl)))({ credential })
-            models = loaded.models
-          } catch (error) {
-            // 单个账号拉取失败：不缓存它的模型集（⇒ 不做模型过滤，保守放行），
-            // 也不影响其它账号的目录。
-            this.options.warn(
-              `[jet-hub] byok 模型目录拉取失败（账号 ${accountId || '(兜底)'}）：${error instanceof Error ? error.message : String(error)}`,
-            )
-            continue
-          }
-          if (accountId.length > 0) {
-            this.accountModels.set(accountId, models.map(m => m.id))
-          }
-          for (const model of models) {
-            if (seen.has(model.id)) continue
-            seen.add(model.id)
-            union.push(model)
-          }
-        }
-        if (union.length > 0) this.remoteModels = union
-      } catch (error) {
-        this.options.warn(`[jet-hub] byok 模型目录加载异常：${error instanceof Error ? error.message : String(error)}`)
-      } finally {
-        this.loading = undefined
+    const task = this.loadRemoteModelsOnce()
+    this.loading = task
+    try {
+      await task
+    } finally {
+      // 只有自己仍是当前任务时才清空：并发调用者可能已经接手。
+      if (this.loading === task) this.loading = undefined
+    }
+  }
+
+  /** {@link ensureRemoteModels} 的实际执行体（单个 in-flight）。 */
+  private async loadRemoteModelsOnce(): Promise<void> {
+    try {
+      const credentials = await this.resolveAllCredentials()
+      const signature = byokModelSignature(credentials)
+      const now = Date.now()
+      const fresh = this.remoteModels !== undefined
+        && signature === this.remoteSignature
+        && now - this.remoteModelsAt < BYOK_MODELS_TTL_MS
+      if (fresh) return
+      // 冷却只针对「上一次一个模型都没拉到、且账号没变」的情形。
+      // 已经有成功目录时不吃冷却：TTL 本身就是节流，否则用户刚新增账号
+      // 会被上一次失败卡住 30 秒 —— 那正是「更新不及时」。
+      if (
+        this.lastAttemptFailed
+        && signature === this.attemptedSignature
+        && now - this.lastAttemptAt < BYOK_MODELS_RETRY_MS
+      ) {
+        return
       }
-    })()
-    await this.loading
+      this.lastAttemptAt = now
+      this.attemptedSignature = signature
+
+      const seen = new Set<string>()
+      const union: ByokModel[] = []
+      const perAccount = new Map<string, readonly string[]>()
+      for (const { accountId, credential } of credentials) {
+        let models: ByokModel[]
+        try {
+          const loaded = await (this.options.loadModels ?? (async (o: { credential: ByokCredential }) =>
+            loadByokModels(o.credential, this.fetchImpl)))({ credential })
+          models = loaded.models
+        } catch (error) {
+          // 单个账号拉取失败：不缓存它的模型集（⇒ 不做模型过滤，保守放行），
+          // 也不影响其它账号的目录。
+          this.options.warn(
+            `[jet-hub] byok 模型目录拉取失败（账号 ${accountId || '(兜底)'}）：${error instanceof Error ? error.message : String(error)}`,
+          )
+          continue
+        }
+        if (accountId.length > 0) {
+          perAccount.set(accountId, models.map(m => m.id))
+        }
+        for (const model of models) {
+          if (seen.has(model.id)) continue
+          seen.add(model.id)
+          union.push(model)
+        }
+      }
+
+      // 账号已被删掉时同步清掉它的模型集，否则「换号」会一直按旧账号的
+      // 亲和性选号，把请求打到错误的平台上。
+      this.accountModels.clear()
+      for (const [accountId, modelIds] of perAccount) {
+        this.accountModels.set(accountId, modelIds)
+      }
+
+      if (union.length === 0) {
+        // 一个模型都没拉到（池里还没账号 / 全部失败）：**不覆盖**旧目录，
+        // 也不推进成功后时间戳 ⇒ 下次调用仍会（按冷却）重试。
+        this.lastAttemptFailed = true
+        return
+      }
+
+      const changed = !byokSameModelIds(this.remoteModels, union)
+      this.remoteModels = union
+      this.remoteModelsAt = now
+      this.remoteSignature = signature
+      this.lastAttemptFailed = false
+      if (changed) this.notifyCatalogChanged()
+    } catch (error) {
+      this.lastAttemptFailed = true
+      this.options.warn(`[jet-hub] byok 模型目录加载异常：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  /**
+   * 通知宿主「目录可能变了」。
+   *
+   * ⚠️ 通知失败**不能**反噬已经拿到的目录：吞掉异常只记日志，
+   * 与 `broadcastCatalogChanged` 同一取舍。
+   */
+  private notifyCatalogChanged(): void {
+    try {
+      this.options.onCatalogChanged?.()
+    } catch (error) {
+      this.options.warn(`[jet-hub] byok 目录变更通知失败：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 
   /**
    * 设置页目录：**同步**返回，且不受黑名单影响。
    *
-   * 首次调用会异步触发一次远端加载（下次打开设置页即有缓存）。
+   * ⚠️ 判据必须**同时**看时间戳，不能只看 `remoteModels === undefined`：
+   * 只看 `undefined` 会让「平台上新模型」永远不自动出现（正是本适配器
+   * 引入 TTL 要解决的那一种）。同步签名不能等网络，故这里只**触发**
+   * 一次后台刷新，本次仍返回当前快照。
    */
   listAllModels(): readonly { id: string; name: string }[] {
     const source = this.remoteModels ?? []
-    if (this.remoteModels === undefined) void this.ensureRemoteModels()
+    if (this.remoteModels === undefined || Date.now() - this.remoteModelsAt >= BYOK_MODELS_TTL_MS) {
+      void this.ensureRemoteModels()
+    }
     return source.map(model => ({ id: model.id, name: model.id }))
   }
 

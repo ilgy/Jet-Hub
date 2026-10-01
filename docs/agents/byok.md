@@ -210,6 +210,52 @@ findAccount → byokApiKeyLooksMalformed → byokResolveBaseUrl
 
 ---
 
+### ⚠️ 模型目录会**自动刷新**，不是「首个成功即永久缓存」
+
+其余 13 个 provider 的适配器（cline / buddy / trae / lobsterai …）都是
+**首个成功结果永久缓存**：`ensureRemoteModels()` 开头一句
+`if (this.remoteModels !== undefined) return`。BYOK **不能**这样，它的目录有
+两个随时会变的来源，永久缓存会直接表现为用户报障「平台上了新模型，插件里
+看不到，重启才出现」：
+
+1. 平台自己上新 —— 智谱一年内从 `glm-4.5` 走到 `glm-5.3`；
+2. **用户在插件里新增 / 删除账号** —— 第二个账号往往指向另一个平台，
+   它的模型必须立刻出现在同一个 `byok` 路由下。
+
+三条机制，缺一不可：
+
+| 机制 | 常量 / 入口 | 作用 |
+| --- | --- | --- |
+| TTL 重验证 | `BYOK_MODELS_TTL_MS = 5 * 60_000` | 过期即重拉，平台上新的模型自己出现 |
+| 账号指纹 | `byokModelSignature(items)` | `accountId@base_url` 排序后 `|` 拼接；指纹变了**立即**重拉，不看 TTL |
+| 变更广播 | `ByokAdapterOptions.onCatalogChanged` | 目录集合真的变了才通知宿主，`src/index.ts` 绑到 `broadcastCatalogChanged(ctx)` |
+
+⚠️ **第三条第 2 半句最容易被漏掉**：只更新服务端内存不够。客户端的
+`ModelCatalogDirectory` 在 `status === 'ready'` 时**短路返回缓存**，只在
+`llm/adapters-updated` / `settings/document-updated` /
+`credentials/reference-updated` 上 refresh ⇒ 不 `emit` 的话用户仍然要重启
+DSH（与「关闭模型不生效」是同一处坑，见 `src/jet-hub-rpc.ts` 的
+`broadcastCatalogChanged`）。
+
+配套取舍：
+
+- **只在模型 id 集合真的变化时**才回调（`byokSameModelIds(a, b)` 做**顺序无关**
+  比较）。否则 TTL 每 5 分钟到点就是一轮无意义的事件风暴；顺序无关则是因为
+  并集顺序随账号池拖拽顺序变，但那是**同一个目录**，不该把界面列表推倒重来。
+- 拉取失败**保留旧目录**（`if (union.length === 0) return` 在赋值之前），
+  一次网络抖动不该让选择器里的模型全没了。
+- 失败冷却 `BYOK_MODELS_RETRY_MS = 30_000`，且**只在「一次都没拉到」且「指纹没变」**
+  时生效。已经有成功目录时不吃冷却：TTL 本身就是节流，再叠一层会让「刚新增
+  账号」被上一次失败卡住 30 秒 —— 那正是「更新不及时」的来源。
+- `listAllModels()` 的判据必须**同时**看时间戳，不能只看
+  `remoteModels === undefined`（只看 `undefined` 就退化成永久缓存）。
+  它是同步签名（设置页契约），故只**触发**后台刷新，本次仍返回当前快照。
+- `notifyCatalogChanged()` 内部 try/catch：宿主事件抛异常不能反噬已经拿到的目录。
+- BYOK 凭据里的 `models?: readonly string[]`（`src/byok.ts:51-55`）**适配器从不读**，
+  目录一律走 `GET /models`；那个字段只是历史遗留的解析宽容度。
+
+---
+
 ### ⚠️ 客户端必须在 `if (loginUrl)` **之前**分流
 
 `account.create` 的 BYOK 分支**不返回 `loginUrl`**（返回空串 + `loginMode: 'key'` +
@@ -261,15 +307,21 @@ case BYOK.id:
 | 校验通过但一发就 401 | 该账号的凭据被外部改了；BYOK **不会**为 401 续期，需重新粘贴 |
 | 账号卡片「刷新」报 `Unknown provider: byok` | `src/rpc/account.ts` 的 `account.refresh` switch 缺 `case BYOK.id:` |
 | 模型列表空但账号已登录 | `ensureRemoteModels()` 全失败时**故意不缓存**空集（避免把临时故障固化成永久空列表），看 `ctx.logger.warn` 的「模型目录拉取失败」 |
+| 平台上新了模型但选择器里没有 | 目录 TTL（5 分钟）还没到；若**永久**看不到，查 `src/index.ts` 是否漏了 `onCatalogChanged: () => broadcastCatalogChanged(ctx)` |
+| 新增了第二个账号但模型没变多 | 同上；另确认客户端在收到 `llm/adapters-updated` 后确有 refresh（`ModelCatalogDirectory` 在 `ready` 时短路返回缓存） |
 | 单个平台一直失败、其它正常 | 该平台的 baseUrl 需要用「候选路径 vs 随机路径」对照组**带 Key** 重测 |
+| 账号卡片「有效期」显示「不适用（API Key 无固定有效期）」 | **正常**：BYOK 凭据没有 `expiresAt`，不是凭据损坏 |
 
 ### 相关测试
 
 - `tests/unit/byok.spec.ts` —— 纯函数层（平台表完整性、目录解析三信封、
   凭据解析必含 `base_url`、请求头、昵称不含 Key 前段、Key 形态预检）。
-- `tests/unit/byok-adapter.spec.ts` —— 适配器行为（目录缓存 / in-flight 共享 /
-  门控 / 失败不缓存 / `max_tokens` 截断 / 图片拒绝 / 401 不续期 / 429 换号 /
-  换号判据 / TRANSPORT / aborted）。
+- `tests/unit/byok-adapter.spec.ts` —— 适配器行为（目录缓存 / **目录自动刷新
+  四例：TTL 重拉、指纹变更立即重拉、`onCatalogChanged` 只在集合真变时触发、
+  失败保留旧目录** / in-flight 共享 / 门控 / 失败不缓存但有 30s 冷却 /
+  `max_tokens` 截断 / 图片拒绝 / 401 不续期 / 429 换号 / 换号判据 / TRANSPORT / aborted）。
+  ⚠️ 用例用 `vi.useFakeTimers({ toFake: ['Date'] })` + `vi.setSystemTime`：TTL 与
+  冷却都以 `Date.now()` 为基准，只 fake `Date` 就不会干扰 Promise 微任务。
 - `tests/unit/byok-rpc-dispatch.spec.ts` —— 源码扫描式分派回归。
   ⚠️ 断言「本分支**不含**某调用」时必须先用 `codeOf(branch)` **剥掉注释**：
   BYOK 分支的注释里刻意写着「绝不能复用 `startLogin` 形状」，

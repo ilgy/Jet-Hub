@@ -123,23 +123,34 @@ describe('ByokAdapter 模型目录', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
-  it('目录全部拉取失败时不缓存（下次调用仍会重试，而不是永久空表）', async () => {
-    const warn = vi.fn()
-    let calls = 0
-    const adapter = makeAdapter({
-      loadModels: async () => {
-        calls += 1
-        throw new Error('boom')
-      },
-      warn,
-    })
-    expect(await adapter.listModels(BYOK.id)).toEqual([])
-    expect(await adapter.listModels(BYOK.id)).toEqual([])
-    expect(calls).toBe(2)
-    // ⚠️ 失败必须留下痕迹：走注入的 `warn`（宿主 `ctx.logger`），
-    // 而不是 `console.warn`（棘轮基线只可下调、且没有宿主上下文）。
-    expect(warn).toHaveBeenCalled()
-    expect(String(warn.mock.calls[0]?.[0])).toContain('模型目录拉取失败')
+  it('目录全部拉取失败时不缓存，但会进入冷却（不是永久空表，也不是每渲染一次打一轮）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const warn = vi.fn()
+      let calls = 0
+      const adapter = makeAdapter({
+        loadModels: async () => {
+          calls += 1
+          throw new Error('boom')
+        },
+        warn,
+      })
+      expect(await adapter.listModels(BYOK.id)).toEqual([])
+      expect(calls).toBe(1)
+      // ⚠️ 冷却期内不再打网络：没有它，面板每渲染一次就是一轮请求。
+      expect(await adapter.listModels(BYOK.id)).toEqual([])
+      expect(calls).toBe(1)
+      // 冷却过去后重试 —— 不是「失败了就永久空表」。
+      vi.setSystemTime(Date.now() + 30_000 + 1)
+      expect(await adapter.listModels(BYOK.id)).toEqual([])
+      expect(calls).toBe(2)
+      // ⚠️ 失败必须留下痕迹：走注入的 `warn`（宿主 `ctx.logger`），
+      // 而不是 `console.warn`（棘轮基线只可下调、且没有宿主上下文）。
+      expect(warn).toHaveBeenCalled()
+      expect(String(warn.mock.calls[0]?.[0])).toContain('模型目录拉取失败')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('没有已登录账号时目录为空（门控），且不消耗一次远端请求', async () => {
@@ -156,6 +167,145 @@ describe('ByokAdapter 模型目录', () => {
     })
     expect(await adapter.listModels(BYOK.id)).toEqual([])
     expect(calls).toBe(0)
+  })
+})
+
+describe('ByokAdapter 目录自动刷新', () => {
+  /**
+   * ⚠️ 这一组是 BYOK 与其余 13 个 provider 的**有意差异**：
+   * cline / buddy / trae / lobsterai 都是「首个成功结果永久缓存」，
+   * BYOK 不能 —— 它的目录有两个随时会变的来源：
+   *
+   * 1. 平台自己上新模型（智谱一年内从 glm-4.5 走到 glm-5.3 一整代）；
+   * 2. **用户在插件里新增 / 删除账号**（第二个账号往往指向另一个平台）。
+   *
+   * 缓存策略三档：TTL 内命中缓存；指纹变化（增删账号 / 换端点）**立即**重拉；
+   * 集合真的变了才广播 `llm/adapters-updated`（否则客户端仍要重启才看得到）。
+   */
+  it('TTL 内重复读取不打网络，过期后自动重拉（平台上新的模型会自己出现）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      let calls = 0
+      let ids = ['glm-4.5']
+      const adapter = makeAdapter({
+        loadModels: async () => {
+          calls += 1
+          return { models: ids.map(id => ({ id })), warnings: [] }
+        },
+      })
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      expect(calls).toBe(1)
+      // TTL 内：命中缓存，一次网络都不打。
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      expect(calls).toBe(1)
+      // 平台上了新模型，时间推进过一个 TTL。
+      ids = ['glm-4.5', 'glm-5.3']
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(2)
+      expect(calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('⚠️ 新增账号时指纹变化 ⇒ 立即重拉，**不受 TTL 限制**（时间不推进也要刷新）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const accounts: Array<{ id: string; credentialRef: string }> = [
+        { id: 'byok-a', credentialRef: 'BYOK_ACCOUNT_A' },
+      ]
+      let calls = 0
+      const adapter = makeAdapter({
+        listAccountEntries: async () => accounts,
+        resolveCredentialForAccount: async (accountId) => buildByokCredential({
+          apiKey: 'key-x',
+          platform: 'custom',
+          baseUrl: accountId === 'byok-a' ? 'https://a.example/v1' : 'https://b.example/v1',
+        }),
+        loadModels: async ({ credential }) => {
+          calls += 1
+          // 每个平台给一组自己的模型：新增账号后并集必须变长。
+          return {
+            models: [{ id: credential.base_url.includes('a.example') ? 'model-a' : 'model-b' }],
+            warnings: [],
+          }
+        },
+      })
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      expect(calls).toBe(1)
+      // 时间**完全没推进**：TTL 内本应命中缓存。
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      expect(calls).toBe(1)
+      // 用户又贴了一个别的平台的 Key ⇒ 新账号的模型必须立刻出现。
+      accounts.push({ id: 'byok-b', credentialRef: 'BYOK_ACCOUNT_B' })
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(2)
+      expect(calls).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('onCatalogChanged 只在模型 id 集合真的变化时触发（不是每次重拉都触发）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const onCatalogChanged = vi.fn()
+      const ids = ['glm-4.5']
+      const adapter = makeAdapter({
+        loadModels: async () => ({ models: ids.map(id => ({ id })), warnings: [] }),
+        onCatalogChanged,
+      })
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(1)
+      // 缓存命中：没有重拉，自然没有通知。
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(1)
+      // 重拉了但集合没变 ⇒ **不通知**（否则 TTL 到点就是一轮无意义的事件风暴）。
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(1)
+      ids.push('glm-5.3')
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      await adapter.listModels(BYOK.id)
+      expect(onCatalogChanged).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('⚠️ 重拉失败时保留旧目录（一次网络抖动不该让选择器里的模型全没了）', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const warn = vi.fn()
+      let failing = false
+      const adapter = makeAdapter({
+        loadModels: async () => {
+          if (failing) throw new Error('boom')
+          return { models: [{ id: 'glm-4.5' }], warnings: [] }
+        },
+        warn,
+      })
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      failing = true
+      vi.setSystemTime(Date.now() + 5 * 60_000 + 1)
+      expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('目录变更通知本身抛异常时不反噬目录（只警告）', async () => {
+    const warn = vi.fn()
+    const adapter = makeAdapter({
+      loadModels: async () => ({ models: [{ id: 'glm-4.5' }], warnings: [] }),
+      onCatalogChanged: () => {
+        throw new Error('emit failed')
+      },
+      warn,
+    })
+    expect(await adapter.listModels(BYOK.id)).toHaveLength(1)
+    expect(warn).toHaveBeenCalled()
+    expect(String(warn.mock.calls[0]?.[0])).toContain('目录变更通知失败')
   })
 })
 

@@ -75,6 +75,9 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   没有身份头，只有一个 `base_url` + 用户自己的 Key。
   ⚠️ 因此 `account.create` 对它**不返回 `loginUrl`**（返回空串 + `loginMode: 'key'`），
   客户端必须在 `if (loginUrl)` **之前**分流，否则会落进「后端未返回登录地址」的 else 分支。
+  ⚠️ 它的模型目录**是自动刷新的**（TTL 5 分钟 + 账号指纹变更立即重拉 + 集合真变时
+  `broadcastCatalogChanged(ctx)` 广播），与其余 13 个 provider 的「首个成功即永久缓存」
+  **有意不同** —— 照抄别的适配器会把「平台上新模型 / 新贴一个 Key 都看不到」重新引进来。
   详见 [byok 分册](docs/agents/byok.md)。
 
 - **包名**：`dsh-codearts-auth`

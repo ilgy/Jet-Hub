@@ -337,7 +337,7 @@ function CreditBalanceRow({ balance, error, loading }) {
       : null));
 }
 
-function AccountCard({ account, index, order, onToggle, onDelete, onRetest, onReset, onClaimOnboarding, onboardingBusy, busy, credits, creditsLoading, showCredits, showRateLimitActions, drag }) {
+function AccountCard({ account, provider, index, order, onToggle, onDelete, onRetest, onReset, onClaimOnboarding, onboardingBusy, busy, credits, creditsLoading, showCredits, showRateLimitActions, drag }) {
   const rateLimits = account.modelRateLimits
     ? Object.entries(account.modelRateLimits).filter(([, v]) => v > Date.now())
     : [];
@@ -396,7 +396,15 @@ function AccountCard({ account, index, order, onToggle, onDelete, onRetest, onRe
         React.createElement('dd', { 'data-tone': expired ? 'warn' : undefined },
           account.expiresAt
             ? `${formatTime(account.expiresAt) || '未知'}${account.refreshable ? ' · 自动续期' : ''}`
-            : '未知')),
+            // ⚠️ BYOK 的「凭据」是用户自己粘贴的第三方 API Key：对方平台不提供
+            // 过期时间，凭据里自然没有 `expiresAt`。此时一律显示「未知」会让用户
+            // 以为凭据坏了（真实反馈：「BYOK 而且 显示未知？」）—— 不是故障，
+            // 是这一行对 BYOK 不适用，故明说语义而不是留一个悬念。
+            : (provider === 'byok'
+                ? React.createElement('span', {
+                    title: 'API Key 没有固定有效期；是否仍可用由平台决定（遇 401 请重新粘贴）',
+                  }, '不适用（API Key 无固定有效期）')
+                : '未知'))),
       // 不支持积分余额的 provider 不渲染该行：留着它只能显示「查询失败」，
       // 而失败原因是「这个 provider 根本没有此接口」——与其展示一条无法修复
       // 的错误，不如不展示。
@@ -1633,6 +1641,8 @@ function ProviderPanel({ provider, rpcCall }) {
               accounts.map((account, index) => React.createElement(AccountCard, {
                 key: account.id,
                 account,
+                // 卡片文案要按 provider 分叉（如 BYOK 没有「有效期」概念）。
+                provider,
                 index,
                 busy: probeBusy !== null,
                 credits: credits[account.id],

@@ -25,7 +25,7 @@ import { RACCOON } from './raccoon-product.js'
 import { BYOK } from './byok-product.js'
 import { AccountPool } from './account-pool.js'
 import { hasLegacyNamespaceRegistration, settingsOf, suppressAutoSettingsPage } from './settings-compat.js'
-import { buildRaccoonNickname, registerJetHubRpc } from './jet-hub-rpc.js'
+import { broadcastCatalogChanged, buildRaccoonNickname, registerJetHubRpc } from './jet-hub-rpc.js'
 import { ALL_PRODUCTS, CODEBUDDY, CODEBUDDY_INTL, WORKBUDDY, WORKBUDDY_CN } from './product.js'
 import { LOBSTERAI } from './lobsterai-product.js'
 import { QODER, QODER_CN } from './qoder-product.js'
@@ -821,6 +821,13 @@ export function apply(ctx: Context): void {
     // 目录/凭据告警出口。适配器拿不到 `ctx`，且 `src/` 的 `console.*` 是
     // 只可下调的棘轮基线，故由这里把宿主的 logger 绑进去。
     warn: (message: string) => ctx.logger.warn(message),
+    // ⚠️ 目录内容变化（平台上新模型、用户新增/删除 BYOK 账号）时必须广播
+    // `llm/adapters-updated`：客户端的 `ModelCatalogDirectory` 在
+    // `status === 'ready'` 时**短路返回缓存**，只在宿主事件上 refresh。
+    // 少这一句的话，服务端内存里的目录已经是最新的，用户界面却仍要重启
+    // DSH 才看得到 —— 与「关闭模型不生效」是同一处坑。
+    // 适配器只在模型 id 集合**真的变了**时才回调，故不会造成事件风暴。
+    onCatalogChanged: () => broadcastCatalogChanged(ctx),
   })
 
   // ===== 多账号静默续期调度 =====
