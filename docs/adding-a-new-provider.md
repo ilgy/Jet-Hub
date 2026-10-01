@@ -5,12 +5,15 @@
 
 ## 概述
 
-本插件已集成了四个 LLM Provider，属于**两种不同的架构脉系**：
+本插件已集成了 **13 个 LLM Provider**，分属 **7 套互不相同的协议族**：
 
 | 脉系 | Provider | 特点 |
 |------|----------|------|
-| **CodeBuddy 系** | `buddy`（腾讯 CodeBuddy 中国版）、`workbuddy`（腾讯 WorkBuddy 国际版） | 同源：共用同一 CLI 内核、同一认证协议（external-link 轮询式）、同一 chat 端点格式，差异全部收敛在 `BuddyProduct` |
+| **CodeBuddy 系** | `buddy` / `buddy-intl` / `workbuddy-cn` / `workbuddy` | 同源：共用同一 CLI 内核、同一认证协议（external-link 轮询式）、同一 chat 端点格式，差异全部收敛在 `BuddyProduct` |
 | **LobsterAI 系** | `lobsterai`（有道龙虾） | 不同源：完全独立的登录协议（本地回调 + authCode 换 token）、独立请求头（`X-LobsterAI-Client-*`）、独立签到协议 |
+| 其余脉系 | `codearts` / `qoder`+`qoder-cn` / `trae`+`trae-intl` / `cline` / `loomy` / `raccoon` | 各自独立一套实现 |
+
+（完整清单与铁律以根目录 `AGENTS.md` 为准；本文只是「怎么加一个新的」的操作手册。）
 
 因此你要添加的 provider 如果属于**已有脉系**（比如再加一个腾讯系产品），只需加一份 `BuddyProduct` 配置并注册实例；如果是**全新的脉系**（全新的API协议、认证方式、签到流程），需要仿照 LobsterAI 创建一套独立但遵循相同架构模式的实现。
 
@@ -144,8 +147,10 @@ export const ALL_PRODUCTS: readonly BuddyProduct[] = [CODEBUDDY, WORKBUDDY, BUDD
 ### A2. 注册 provider 实例（`src/index.ts`）
 
 ```typescript
-// 1. 注册 settings namespace（与 registerProviderSettings 的调用保持一致）
-registerProviderSettings(ctx, 'llm-buddy', 'llm-workbuddy', 'llm-codearts', 'llm-lobsterai', 'llm-buddy-eu')
+// 1. 注册 settings namespace（`src/index.ts:158` 起的真实调用已列全 13 个，把新的追加进去）
+registerProviderSettings(ctx, 'llm-buddy', 'llm-buddy-intl', 'llm-workbuddy-cn', 'llm-workbuddy',
+  'llm-codearts', 'llm-lobsterai', 'llm-qoder', 'llm-qoder-cn', 'llm-trae', 'llm-trae-intl',
+  'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-buddy-eu')
 
 // 2. 创建认证服务实例
 const buddyEu = new BuddyAuth(ctx, { product: BUDDY_EU })
@@ -190,7 +195,7 @@ case 'buddy-eu':
   break
 
 // account.create —— 与 buddy/workbuddy 共用 productById 分支，无需改动
-// 但需在 registerJetHubRpc 签名中增加 buddyEu 参数，并传入
+// 但需在 registerJetHubRpc(ctx, { ... }) 的具名对象里加 buddyEu: buddyEuAuth 字段
 ```
 
 ### A4. 客户端侧
@@ -369,7 +374,9 @@ import { DeepseekOfficialAuth } from './deepseek-official-auth.js'
 import { registerDeepseekOfficialLlm } from './deepseek-official-adapter.js'
 
 // 1. 注册 settings namespace
-registerProviderSettings(ctx, 'llm-buddy', 'llm-workbuddy', 'llm-codearts', 'llm-lobsterai', 'llm-deepseek-official')
+registerProviderSettings(ctx, 'llm-buddy', 'llm-buddy-intl', 'llm-workbuddy-cn', 'llm-workbuddy',
+  'llm-codearts', 'llm-lobsterai', 'llm-qoder', 'llm-qoder-cn', 'llm-trae', 'llm-trae-intl',
+  'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-deepseek-official')
 
 // 2. 创建认证服务
 const deepseekOfficial = new DeepseekOfficialAuth(ctx)
@@ -405,32 +412,43 @@ async function refreshAllCredentials(): Promise<void> {
 
 ### B6. 注册 RPC 分派（`src/jet-hub-rpc.ts`）
 
-`registerJetHubRpc` 需新增新 provider 的 auth 实例参数，并在以下位置加分派：
+⚠️ **P1-⑤ 已改为具名对象**：`registerJetHubRpc(ctx, services)` 只收两个参数，
+`services` 是 `JetHubRpcServices`（`src/jet-hub-rpc.ts:525` 起）——`ctx` 仍单独传，
+它只用于 `connection` 的**惰性注入**（`ctx.inject`）。
+
+**之前是 18 个位置参数**，新增 provider 时测试侧漏改位置实参，
+导致 2 个用例**静默错位**（接错服务与接对服务在类型上完全等价）。现在：
+
+- 少接 / 接错**字段名** = 编译错误（`pnpm typecheck` 直接拦下）；
+- 新增 provider 只需在 `JetHubRpcServices` 加一个字段，不用碰任何调用点的参数顺序。
 
 ```typescript
-// 1. 函数签名增加参数
-export function registerJetHubRpc(
-  ctx: Context,
-  pool: AccountPool,
-  codearts: CodeArtsAuth,
-  buddy: BuddyAuth,
-  workbuddy: BuddyAuth,
-  lobsterai: LobsteraiAuth,
-  deepseekOfficial: DeepseekOfficialAuth,  // 新增
-): void { ... }
+// 1. src/jet-hub-rpc.ts —— 在 JetHubRpcServices 里加字段
+export interface JetHubRpcServices {
+  pool: AccountPool
+  // ...现有 13 个 provider 字段
+  deepseekOfficial: DeepseekOfficialAuth   // 新增
+  modelAdapters?: Readonly<Record<string, ModelCatalogSource>>   // 保持可选
+}
 
-// 2. account.create —— 加新分支
+// 2. src/index.ts —— 调用点用具名对象，顺序不再有意义
+registerJetHubRpc(ctx, {
+  pool, codearts, buddy, /* ... */ deepseekOfficial,
+  modelAdapters,
+})
+
+// 3. 端点实现分别位于 src/rpc/*.ts，按前缀分派：
+//    account.ts / login.ts / onboarding.ts / credits.ts / models.ts / backup.ts
+//    account.create —— 加新分支
 if (provider === 'deepseek-official') {
   const started = await deepseekOfficial.startLogin({ refName })
   // ... 占位条目 + 异步回调
 }
-
-// 3. account.refresh —— switch 加新 case
+//    account.refresh —— switch 加新 case（最容易漏）
 case 'deepseek-official':
   await deepseekOfficial.refreshAccountCredential(entry.credentialRef)
   break
-
-// 4. credits.* —— 加新分支（如有积分能力）
+//    credits.* —— 加新分支（如有积分能力）
 //    credits.status / credits.claimAll / credits.balances 各加一个分支
 ```
 
@@ -442,11 +460,17 @@ case 'deepseek-official':
 export const CREDITS_CAPABILITIES = Object.freeze({
   codearts: Object.freeze({ balance: true, dailyCheckin: true }),
   buddy: Object.freeze({ balance: true, dailyCheckin: true }),
+  'workbuddy-cn': Object.freeze({ balance: true, dailyCheckin: true }),
+  // ⚠️ 同族的国际版登记为 false —— 不是「后端没有接口」，而是该区域**活动位不下发**。
+  // 判定时不要把「某个区域测不到活动」推广成「协议族没有该能力」（2026-10-01 的 WorkBuddy 真实缺陷）。
   workbuddy: Object.freeze({ balance: true, dailyCheckin: false }),
   lobsterai: Object.freeze({ balance: true, dailyCheckin: true }),
   'deepseek-official': Object.freeze({ balance: false, dailyCheckin: false }),  // 新增
 });
 ```
+
+⚠️ **登记 `dailyCheckin` 前必须先用真实凭据打状态端点**（只读，不要打领取端点），
+证据要覆盖**每一个区域变体**：同一协议族的 `-cn` 与国际版可能一个有一个没有。
 
 **规则**：
 - **默认关闭**：未登记的 provider 视为两项全无。忘登记时最坏结果是暂时看不到积分，而不是每次打开面板都发一个必然失败的请求
@@ -491,7 +515,8 @@ export const CREDITS_CAPABILITIES = Object.freeze({
 - [ ] 认证服务已创建（`new SomethingAuth(ctx)`）
 - [ ] LLM 适配器已注册（`registerSomethingLlm(ctx, ...)`）
 - [ ] 批量续期已加入（`refreshAllCredentials` 中的 try/catch）
-- [ ] Jet Hub RPC 已传入（`registerJetHubRpc` 参数）
+- [ ] Jet Hub RPC 已传入（**在 `registerJetHubRpc(ctx, { ... })` 的具名对象里加字段**，不用管顺序）
+- [ ] `JetHubRpcServices` 接口已加同名字段（少接 / 接错字段名会让 `pnpm typecheck` 直接报错）
 - [ ] `ctx.effect` 的 cleanup 包含新服务的 `stop()`
 
 ### 续期与账号池
@@ -508,11 +533,11 @@ export const CREDITS_CAPABILITIES = Object.freeze({
 - [ ] 异步回调失败时**删除占位条目**（不留幽灵账号）
 - [ ] 前端**没有** `window.location.href = loginUrl` 作为兜底（弹窗被拦截时应展示可点击链接）
 
-### `jet-hub-rpc.ts`
+### `src/rpc/*.ts`（P1-⑤ 起端点实现按领域拆分）
 
-- [ ] `account.create` 有该 provider 的分支
-- [ ] `account.refresh` 的 switch 有该 provider 的 case
-- [ ] `credits.*` 各端点有该 provider 的分支（如果它有积分能力的话）
+- [ ] `src/rpc/account.ts` 的 `account.create` 有该 provider 的分支
+- [ ] `src/rpc/account.ts` 的 `account.refresh` switch 有该 provider 的 case（**最容易漏**）
+- [ ] `src/rpc/credits.ts` 各端点有该 provider 的分支（如果它有积分能力的话）
 - [ ] 没有写死字面量（如 `LOBSTERAI.id` 代替 `'lobsterai'`）
 
 ### 客户端

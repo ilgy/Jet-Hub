@@ -363,8 +363,18 @@ const WORKBUDDY_FALLBACK_MODELS: readonly BuddyFallbackModel[] = [
  * - `authentication.attributes.platform` = "workbuddy-ai"
  * - `prefixPath` = "/plugin"（与中国版相同）
  *
- * 该产品**没有**每日签到积分接口（内核中只有 `/v2/billing/meter/get-dosage-notify`），
- * 因此 Jet Hub 不为其渲染「一键领取积分」按钮；积分领取在 CodeBuddy 侧完成。
+ * ⚠️ 2026-10-01 修正：旧注释称「该产品**没有**每日签到积分接口（内核中只有
+ * `/v2/billing/meter/get-dosage-notify`）」—— **实测证伪**。该区域**有**
+ * `checkin-activity-status` / `daily-checkin` 两个端点（对照组探针确证：
+ * 候选路径 401 vs 随机路径 404）。真实原因是**活动位不下发**：
+ * `active:false` / `total_credits:0` / `start_time:""`，领取返回
+ * `code 10001`「签到活动未开启或已过期」。
+ *
+ * 故 Jet Hub 仍不为其渲染「一键领取积分」按钮（`credits-capabilities.js`
+ * 登记 `dailyCheckin:false`），但理由已从「无接口」改为「本区域无活动」。
+ * 对照：国内版 `WORKBUDDY_CN` 同路径同请求头，**有活动**（实测连续 2 天、
+ * 每日 100 积分），故其登记为 true。
+ * 教训：端点存在性不能靠「内核里搜不到字面量」判断 —— 那是打包器视角。
  */
 export const WORKBUDDY: BuddyProduct = {
   id: 'workbuddy',
@@ -428,6 +438,15 @@ export const CODEBUDDY_INTL: BuddyProduct = {
  * 客户端也有对应面板。删掉这份配置会让该账号成孤儿。
  *
  * 与 `WORKBUDDY`（国际版）同源，差异在 endpoint 与 `appendSessionParams`。
+ *
+ * ⚠️ 该区域**有真实可用的每日签到**（2026-10-01 实测，用池里真实凭据 +
+ * 生产同款请求头）：`POST {endpoint}/v2/billing/meter/checkin-activity-status`
+ * → `HTTP 200 {"code":0,"data":{"active":true,"today_checked_in":true,
+ * "streak_days":2,"daily_credit":100,"total_credits":200,
+ * "activity_name":"Buddy应用","season":10,"start_time":"2026-09-30 00:00:00",
+ * "end_time":"2026-10-15 23:59:59"}}`；重放领取返回 `code 10001`
+ * 「今天已签到，请明天再来」（余额不变，幂等安全）。
+ * 能力矩阵原登记 `dailyCheckin:false` 是**缺陷**，会让面板不渲染领取按钮。
  */
 export const WORKBUDDY_CN: BuddyProduct = {
   id: 'workbuddy-cn',

@@ -9,11 +9,56 @@ import {
   computeClaimSummary,
   registerJetHubRpc,
 } from '../../src/jet-hub-rpc.js'
-import type { CreditsEndpointDeps } from '../../src/jet-hub-rpc.js'
+import type { CreditsEndpointDeps, JetHubRpcServices } from '../../src/jet-hub-rpc.js'
 import { AccountPool } from '../../src/account-pool.js'
 import type { ClaimOutcome, CheckinStatus, CreditBalance } from '../../src/credits.js'
 import { WORKBUDDY } from '../../src/product.js'
 import type { ProviderAccountEntry } from '../../src/types.js'
+
+/**
+ * 具名的 `JetHubRpcServices` 替身：`pool` 与各 provider 服务默认都是空对象，
+ * 用例只覆盖自己关心的那几个字段。
+ *
+ * ⚠️ P1-⑤ 结构重构起 `registerJetHubRpc` 收**具名对象**（不再是 18 个位置参数）：
+ * 少接或接错字段是编译错误，不会再出现「位置错位但所有实参类型相同」的静默失配。
+ */
+function stubServices(overrides: Partial<JetHubRpcServices> = {}): JetHubRpcServices {
+  return {
+    pool: {} as never,
+    codearts: {} as never,
+    buddy: {} as never,
+    buddyIntl: {} as never,
+    workbuddy: {} as never,
+    workbuddyCn: {} as never,
+    lobsterai: {} as never,
+    qoder: {} as never,
+    qoderCn: {} as never,
+    trae: {} as never,
+    traeIntl: {} as never,
+    cline: {} as never,
+    loomy: {} as never,
+    raccoon: {} as never,
+    ...overrides,
+  }
+}
+
+/**
+ * 源码级守卫要读的 RPC 源码文件（门面 + 6 个领域模块）。
+ *
+ * ⚠️ P1-⑤ 结构重构把 `handleMethod` 的各个分支按领域搬到了 `src/rpc/*.ts`：
+ * 只读门面会让「某分支必须存在」这类守卫全部假红。这里合并成一个文本，顺序尽量
+ * 保持重构前单文件内的相对顺序 —— 尤其是 credits 必须排在 models 之前，因为有用例
+ * 用 `case 'credits.balances'` → `case 'model.list'` 做切片。
+ */
+const RPC_SOURCE_FILES = [
+  '../../src/jet-hub-rpc.ts',
+  '../../src/rpc/account.ts',
+  '../../src/rpc/login.ts',
+  '../../src/rpc/onboarding.ts',
+  '../../src/rpc/credits.ts',
+  '../../src/rpc/models.ts',
+  '../../src/rpc/backup.ts',
+] as const
 
 describe('积分领取结果汇总', () => {
   it('统计成功数量与累计积分', () => {
@@ -635,19 +680,14 @@ describe('account.create 必须立即返回 loginUrl（两步式登录回归）'
       credentials: { resolve: async () => undefined, set: async () => {}, unset: async () => {} },
     }
 
-    registerJetHubRpc(
-      ctx as never, pool as never,
-      makeAuth('codearts') as never,
-      {} as never, {} as never, {} as never, {} as never,
-      makeAuth('lobsterai') as never,
-      makeAuth('qoder') as never,
-      {} as never,
-      makeAuth('trae') as never,
-      {} as never,
-      makeAuth('cline') as never,
-      {} as never,
-      {} as never,
-    )
+    registerJetHubRpc(ctx as never, stubServices({
+      pool: pool as never,
+      codearts: makeAuth('codearts') as never,
+      lobsterai: makeAuth('lobsterai') as never,
+      qoder: makeAuth('qoder') as never,
+      trae: makeAuth('trae') as never,
+      cline: makeAuth('cline') as never,
+    }))
     if (handler === undefined) throw new Error('endpoint handler was not registered')
 
     const call = async (method: string, payload: unknown) => {
@@ -726,12 +766,11 @@ describe('account.create 必须立即返回 loginUrl（两步式登录回归）'
         }
       },
     }
-    registerJetHubRpc(
-      ctx as never, pool as never, auth as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never,
-    )
+    registerJetHubRpc(ctx as never, stubServices({
+      pool: pool as never,
+      // codearts 是这里唯一需要的真服务：account.create 走它的 startLogin。
+      codearts: auth as never,
+    }))
     const response = await handler!(new Request('http://localhost/api/jet-hub', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -780,17 +819,13 @@ describe('account.create 必须立即返回 loginUrl（两步式登录回归）'
         throw new Error('TRAE 回调端口 18080 无法监听（EADDRINUSE）；端口可能已被其它程序占用，请释放后重试。')
       },
     }
-    registerJetHubRpc(
-      // ⚠️ 同样的位置参数陷阱：`failingAuth` 必须落在 trae 的位置上。
-      ctx as never, pool as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never,
-      failingAuth as never, // 9: trae
-      {} as never, // 10: traeIntl
-      {} as never, // 11: cline
-      {} as never, // 12: loomy
-      {} as never, // 13: raccoon
-    )
+    registerJetHubRpc(ctx as never, stubServices({
+      // ⚠️ 具名字段即身份：`failingAuth` 必须落在 `trae` 这个字段上 ——
+      // 位置参数时代这里靠「第 9 个实参」指定，接错位也不会报错
+      // （本用例正是那个陷阱的产物：注释里数的是下标）。
+      pool: pool as never,
+      trae: failingAuth as never,
+    }))
     if (handler === undefined) throw new Error('endpoint handler was not registered')
 
     const response = await handler(new Request('http://localhost/api/jet-hub', {
@@ -956,15 +991,11 @@ describe('model.list / model.setDisabled 端点', () => {
       },
     }
 
-    // 参数顺序：ctx, pool, codearts, buddy, buddyIntl, workbuddy, workbuddyCn,
-    //           lobsterai, qoder, qoderCn, trae, traeIntl, modelAdapters
-    registerJetHubRpc(
-      ctx as never, pool,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never,
-      options.modelAdapters as never,
-    )
+    // 具名对象：`pool` 与 `modelAdapters` 是字段名，不再有位置顺序可言。
+    registerJetHubRpc(ctx as never, stubServices({
+      pool,
+      modelAdapters: options.modelAdapters as never,
+    }))
     if (handler === undefined) throw new Error('endpoint handler was not registered')
 
     /** 调用一个端点方法，返回解包后的 result。 */
@@ -1474,12 +1505,7 @@ describe('积分端点的 provider 能力边界', () => {
     // 而不会因为抛 TypeError 变成误导性的 handler-failed。
     const pool = { listAccounts: async () => [] }
 
-    registerJetHubRpc(
-      ctx as never, pool as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never,
-    )
+    registerJetHubRpc(ctx as never, stubServices({ pool: pool as never }))
     if (handler === undefined) throw new Error('endpoint handler was not registered')
 
     return async (method: string, payload: unknown) => {
@@ -1582,8 +1608,12 @@ describe('积分端点的 provider 能力边界', () => {
    */
   it('TRAE 的 claim 分支开启状态预检并注入 fetchStatus（源码级守卫）', () => {
     // 注意 `here` 是同级另一个 describe 内的局部常量，此处不可见，故就地算路径。
-    const srcPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../src/jet-hub-rpc.ts')
-    const source = readFileSync(srcPath, 'utf8')
+    // ⚠️ P1-⑤ 结构重构：TRAE 分支随 `credits.claimAll` 搬到了 `src/rpc/credits.ts`，
+    // 故读「门面 + 领域模块」的合并文本（文件清单见 RPC_SOURCE_FILES 的说明）。
+    const here = dirname(fileURLToPath(import.meta.url))
+    const source = RPC_SOURCE_FILES
+      .map((rel) => readFileSync(resolve(here, rel), 'utf8'))
+      .join('\n')
     // 从 claimAll 的 TRAE 分支起算（前面 credits.status 分支里也有同名判断，
     // 用 `collectClaimResults<TraeCredential` 定位更准）。
     const start = source.indexOf('collectClaimResults<TraeCredential')
@@ -1653,12 +1683,7 @@ describe('account.reorder 端点', () => {
       logger: { warn: () => {}, info: () => {} },
       credentials: { resolve: async () => undefined },
     }
-    registerJetHubRpc(
-      ctx as never, pool as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
-      {} as never,
-    )
+    registerJetHubRpc(ctx as never, stubServices({ pool: pool as never }))
     if (handler === undefined) throw new Error('endpoint handler was not registered')
 
     const call = async (method: string, payload: unknown) => {

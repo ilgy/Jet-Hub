@@ -49,10 +49,13 @@
  * 均无任何 Cline 业务端点命中（`campaign` 的命中是 PostHog 的 UTM 参数与
  * feature-flag 事件属性；`daily` 是 YAML cron 别名与 Blob 导出频率枚举）。
  *
- * 故本模块**只实现余额**，`dailyCheckin` 能力登记为 false
- * （与 WorkBuddy 国际版的先例一致）。若将来 Cline 增加签到，
- * 需按 Qoder 那次教训（「某次实测没看到」不能推广成「不存在」）
- * 重新采集，而不是假设它永远不存在。
+ * 故本模块**只实现余额**，`dailyCheckin` 能力登记为 false。
+ * ⚠️ 不要拿「WorkBuddy 国际版也没有签到」做类比（旧注释的写法）—— 2026-10-01
+ * 实测证伪：WorkBuddy 国际版**有**签到端点，只是该区域活动位不下发；而
+ * `workbuddy-cn` 实测**有活动**（已由 `dailyCheckin:false` 修正为 true）。
+ * Cline 的判据是**独立的**：对整个 sidecar 做字符串扫描无业务端点命中。
+ * 若将来 Cline 增加签到，需按 Qoder 那次教训（「某次实测没看到」不能推广成
+ * 「不存在」）重新采集，而不是假设它永远不存在。
  */
 
 import { roundCredits, type CreditBalance, type CreditPackage } from './credits.js'

@@ -34,6 +34,30 @@ const mockedRunLoginFlow = vi.mocked(runLoginFlow)
 const mockedRunOAuthFlow = vi.mocked(runOAuthFlow)
 const mockedRunBuddyLoginFlow = vi.mocked(runBuddyLoginFlow)
 
+/** 客户端 PROVIDERS 列表的解析正则（面板 id 即 provider id）。 */
+const PANEL_ID_PATTERN = /\{\s*id:\s*'([a-z][a-z0-9-]*)',\s*label:/g
+
+/**
+ * 从 `plugin-src/client/jet-hub.js` 的 PROVIDERS 列表派生 provider id 集合。
+ *
+ * 为什么派生而不硬编码：客户端列表是面板的**唯一真相源**，测试里再抄一份字面量
+ * 就必然漂移 —— 本文件原先的 `settingsNs` / namespace 断言只列了 6 个 provider，
+ * 于是新增 provider 漏注册 `llm-${id}` 时测试仍然全绿，而线上会在模型设置页的
+ * `refFor → deriveKeyRef(provider)` 处崩溃。派生后「加 provider 忘注册」立刻失败。
+ *
+ * 解析结果为空时直接抛错：静默的空集合会让下面所有 `for...of` 断言变成空转，
+ * 那是比断言失败更坏的失效模式。
+ */
+function panelProviderIds(): string[] {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const clientSource = readFileSync(resolve(here, '../../plugin-src/client/jet-hub.js'), 'utf8')
+  const ids = [...clientSource.matchAll(PANEL_ID_PATTERN)].map((m) => m[1]!)
+  if (ids.length === 0) {
+    throw new Error('未能从 plugin-src/client/jet-hub.js 解析出任何 provider id（正则或文件结构已变）')
+  }
+  return ids
+}
+
 class FakeCredentials {
   private store = new Map<string, string>()
   async resolve(ref: string) {
@@ -289,9 +313,7 @@ describe('WorkBuddy provider 注册', () => {
    * 任何一侧新增而另一侧漏加都会立刻失败 —— 比逐个 `toContain` 更难绕过。
    */
   it('客户端列出的每个 provider 都有服务端实例（防面板空壳）', () => {
-    const here = dirname(fileURLToPath(import.meta.url))
-    const clientSource = readFileSync(resolve(here, '../../plugin-src/client/jet-hub.js'), 'utf8')
-    const panelIds = [...clientSource.matchAll(/\{\s*id:\s*'([a-z][a-z0-9-]*)',\s*label:/g)].map((m) => m[1]!)
+    const panelIds = panelProviderIds()
 
     const ctx = createMockContext()
     apply(ctx as never)
@@ -322,7 +344,10 @@ describe('WorkBuddy provider 注册', () => {
     // Gitee 的 b3a9561 整体替换：目录固定，而「没有账号就不显示模型」改由
     // 各适配器 listModels() 里的 providerCatalogVisible() 门控实现
     // （空分组会被 DSH 的 buildModelCatalog 过滤掉）。
-    for (const provider of ['codearts', 'buddy', 'workbuddy', 'lobsterai', 'qoder', 'trae']) {
+    //
+    // 断言集合从客户端面板列表派生（见 panelProviderIds）：provider 数量每加一个，
+    // 这里就自动多验一个，不再需要手抄字面量。
+    for (const provider of panelProviderIds()) {
       const entry = ctx.llm.configurableProviders.find((item: { provider: string }) => item.provider === provider)
       expect(entry, provider).toBeDefined()
       expect(entry?.settingsNs, provider).toBe(`llm-${provider}`)
@@ -333,13 +358,14 @@ describe('WorkBuddy provider 注册', () => {
   it('全部产品的 settings namespace 始终预注册，避免未注册崩溃', () => {
     const ctx = createMockContext()
     apply(ctx as never)
-    expect(ctx.settings.registeredNamespaces).toContain('llm-codearts')
-    expect(ctx.settings.registeredNamespaces).toContain('llm-buddy')
-    expect(ctx.settings.registeredNamespaces).toContain('llm-workbuddy')
-    // 六个 provider 的 namespace 都要预注册（含 Gitee 新增的三个）
-    expect(ctx.settings.registeredNamespaces).toContain('llm-lobsterai')
-    expect(ctx.settings.registeredNamespaces).toContain('llm-qoder')
-    expect(ctx.settings.registeredNamespaces).toContain('llm-trae')
+    const registered = new Set(ctx.settings.registeredNamespaces)
+    const panelIds = panelProviderIds()
+    // 覆盖判据与上面同一份来源：客户端每列一个面板，就必须有一个已注册的
+    // `llm-${id}` —— 这正是「设置页 refFor → deriveKeyRef 崩溃」那一类缺陷。
+    expect(panelIds.length).toBeGreaterThan(0)
+    for (const id of panelIds) {
+      expect(registered, `provider ${id} 的 llm-${id} namespace 未预注册`).toContain(`llm-${id}`)
+    }
   })
 
   it('不注册任何 provider 的斜杠命令（入口都在 Jet Hub 设置页）', () => {

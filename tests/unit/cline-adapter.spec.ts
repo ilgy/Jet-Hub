@@ -544,6 +544,20 @@ describe('ClineAdapter 限流与换号判定', () => {
 describe('Cline 接线（源码级回归）', () => {
   const root = resolve(here, '../..')
   const read = (rel: string): string => readFileSync(resolve(root, rel), 'utf8')
+  /**
+   * ⚠️ P1-⑤ 结构重构：各 method 的处理器按领域拆到了 `src/rpc/*.ts`，
+   * 门面只剩公共助手与薄分发器。源码级守卫因此读「门面 + 领域模块」的合并文本，
+   * 否则会假红（分支还在，只是不在原来的文件里了）。
+   */
+  const RPC_SOURCE_FILES = [
+    'src/jet-hub-rpc.ts',
+    'src/rpc/account.ts',
+    'src/rpc/login.ts',
+    'src/rpc/onboarding.ts',
+    'src/rpc/credits.ts',
+    'src/rpc/models.ts',
+    'src/rpc/backup.ts',
+  ]
 
   it('index.ts 注册 cline 服务、适配器与续期', () => {
     const source = read('src/index.ts')
@@ -553,18 +567,20 @@ describe('Cline 接线（源码级回归）', () => {
     expect(source).toContain('cline.stop()')
     // Jet Hub「显示列表」需要适配器实例
     expect(source).toContain('cline: clineAdapter')
-    // ⚠️ 形参是**位置参数**，新增 provider 会插在 cline 与 modelAdapters 之间。
-    // 只断言「cline 在正确位置、末尾是 modelAdapters」，不要写死整串
-    // —— 那会让每加一个 provider 都假失败（加 Loomy 时踩过一次）。
+    // ⚠️ P1-⑤ 起形参是**具名对象**：`cline` 是字段名，不再是「第 12 个实参」。
+    // 仍只锁定「cline 被接线」（它后面到 modelAdapters 之间可以多出别的字段），
+    // 不要写死整串 —— 那会让每加一个 provider 都假失败（加 Loomy 时踩过一次）。
     expect(source).toMatch(
-      /registerJetHubRpc\([\s\S]*?cline,[\s\S]*?modelAdapters\)/,
+      /registerJetHubRpc\(ctx, \{[\s\S]*?\n\s*cline,[\s\S]*?modelAdapters,/,
     )
     // 老契约下的 settings namespace
     expect(source).toContain("'llm-cline'")
   })
 
   it('jet-hub-rpc.ts 为 cline 接上登录、续期与余额三个分派点', () => {
-    const source = read('src/jet-hub-rpc.ts')
+    // ⚠️ P1-⑤：三个分派点现在分别落在 account.ts（登录 / 续期）与 credits.ts
+    // （余额、签到拒绝），故读「门面 + 领域模块」的合并文本。
+    const source = RPC_SOURCE_FILES.map((rel) => read(rel)).join('\n')
     expect(source).toContain('cline.startLogin({ refName })')
     expect(source).toContain('cline.refreshAccountCredential(entry.credentialRef)')
     expect(source).toContain('fetchClineCreditBalance(credential, CLINE)')

@@ -4,7 +4,26 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+
+/**
+ * ⚠️ P1-⑤ 结构重构：`handleMethod` 的各个分支按领域拆到了 `src/rpc/*.ts`，
+ * 门面只剩公共助手与薄分发器。源码级守卫因此读「门面 + 领域模块」的**合并文本**
+ * —— 守卫意图不变（分支必须存在），只是不再假设它们长在同一个文件里。
+ *
+ * 顺序有讲究：`case 'credits.balances'`（credits.ts）必须排在
+ * `case 'model.list'`（models.ts）之前，否则跨文件切片断言会取到空串。
+ */
+const RPC_SOURCE_FILES = [
+  '../../src/jet-hub-rpc.ts',
+  '../../src/rpc/account.ts',
+  '../../src/rpc/login.ts',
+  '../../src/rpc/onboarding.ts',
+  '../../src/rpc/credits.ts',
+  '../../src/rpc/models.ts',
+  '../../src/rpc/backup.ts',
+] as const
+
+const rpcSource = RPC_SOURCE_FILES.map((rel) => readFileSync(resolve(here, rel), 'utf8')).join('\n')
 const typesSource = readFileSync(resolve(here, '../../src/types.ts'), 'utf8')
 
 /**
@@ -110,7 +129,9 @@ describe('Loomy RPC 分派', () => {
   })
 
   it('LOOMY 已导入', () => {
-    expect(rpcSource).toContain("from './loomy-product.js'")
+    // P1-⑤ 起 Loomy 的产品常量由 `src/rpc/account.ts` 引入（`'../loomy-product.js'`），
+    // 故这里用正则容忍 `./` 与 `../` 两种相对前缀。
+    expect(rpcSource).toMatch(/from '\.\.?\/loomy-product\.js'/)
   })
 
   /**

@@ -1,8 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import {
-  attributionHeaders, CONTEXT_WINDOW_EXCEEDED_CODE, isContextWindowExceededError,
-  isQuotaExceededError, LlmAdapter, LlmError, QUOTA_EXCEEDED_CODE,
+  attributionHeaders, LlmAdapter, LlmError,
 } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -10,6 +9,11 @@ import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { settingsNamespaceFor } from './settings-compat.js'
 import { isCodeArtsBenefitModel } from './models.js'
 import { normalizeHarnessMessages } from './message-shape.js'
+import {
+  errorMessageText,
+  errorDetail as sharedErrorDetail,
+  httpErrorCode as classifyHttpError,
+} from './http-error.js'
 import { signRequestHuawei } from './sign.js'
 import { createBlankReasoningSuppressor, createReasoningLoopDetector, hasUsableToolName, isReasoningLoopGuardEnabled, isTruncatedArguments, normalizeToolArguments, readWithIdleTimeout, resolveEmptyResponseReason, resolveToolPairing, stripCourseLeakFromHistoryContent, stripCourseLeakIfEnabled } from './sse.js'
 import type { CodeArtsCredential } from './types.js'
@@ -369,26 +373,22 @@ function isSseQueueErrorCode(code: string): boolean {
     || /81111|TPM|429|rate.?limit|too many requests|排队|限流/i.test(code)
 }
 
-/** 从错误体提取可分类的 detail 文本（OpenAI 风格 error 或 CodeArts error_code/error_msg）。 */
+/**
+ * CodeArts 的 detail 口径选项：认嵌套 `error.code/type/message`、
+ * `error_code` / `error_msg`（CodeArts 形态）与顶层 `message`，**不**加
+ * `code=` 前缀、**不**认 `msg` 与裸字符串 `error` —— 与迁移前的本地实现逐字一致。
+ */
+const CODEARTS_DETAIL_OPTIONS = {
+  codeLabel: false,
+  errorType: true,
+  nestedError: false,
+  errorCodeFields: true,
+  msgField: false,
+} as const
+
+/** 从错误体提取可分类的 detail 文本（见 {@link CODEARTS_DETAIL_OPTIONS}）。 */
 function errorDetail(body: string): string {
-  try {
-    const data = JSON.parse(body) as Record<string, unknown>
-    const error = typeof data.error === 'object' && data.error !== null
-      ? data.error as Record<string, unknown>
-      : undefined
-    const parts = [
-      typeof error?.code === 'string' ? error.code : undefined,
-      typeof error?.type === 'string' ? error.type : undefined,
-      typeof error?.message === 'string' ? error.message : undefined,
-      typeof data.error_code === 'string' ? data.error_code : undefined,
-      typeof data.error_msg === 'string' ? data.error_msg : undefined,
-      typeof data.message === 'string' ? data.message : undefined,
-    ].filter((value): value is string => value !== undefined)
-    if (parts.length > 0) return parts.join(' ')
-  } catch {
-    // 非 JSON 错误体：直接用原文分类。
-  }
-  return body
+  return sharedErrorDetail(body, CODEARTS_DETAIL_OPTIONS)
 }
 
 /**
@@ -396,18 +396,12 @@ function errorDetail(body: string): string {
  * httpErrorCode 词汇一致：400 且命中上下文超限措辞时归为
  * CONTEXT_WINDOW_EXCEEDED（触发 dsh compaction 自动压缩上下文），
  * 而不是不可重试的 HTTP_400，避免长会话在接近窗口上限时直接中断。
+ *
+ * 判定实现统一在 `src/http-error.ts`（配额判定按 CodeArts 形态开启：
+ * `isQuotaExceededError(detail)` → QUOTA 码）。
  */
 function httpErrorCode(status: number, body: string): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  const detail = errorDetail(body)
-  if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) {
-    if (isContextWindowExceededError(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE
-    return 'INVALID_REQUEST'
-  }
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
+  return classifyHttpError(status, body, { ...CODEARTS_DETAIL_OPTIONS, quota: true })
 }
 
 /** 可中止的休眠；当信号中止时立即 resolve。 */
@@ -425,8 +419,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** 安全读取 Error.message，避免访问器抛异常。 */
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  try { return String(error) } catch { return 'unknown error' }
+  return errorMessageText(error)
 }
 
 /**
@@ -739,15 +732,25 @@ class DsmlContentExtractor {
 
 /** 兼容 OpenAI 格式的 CodeArts 模型适配器，使用华为请求签名。 */
 export class CodeArtsAdapter extends LlmAdapter {
-  private readonly fetchImpl: typeof fetch
   private readonly chatId: string
   private readonly sessionId: string
 
   constructor(private readonly options: CodeArtsAdapterOptions) {
     super()
-    this.fetchImpl = options.fetchImpl ?? fetch
     this.chatId = options.chatId ?? crypto.randomUUID().replace(/-/g, '')
     this.sessionId = options.sessionId ?? crypto.randomUUID().replace(/-/g, '')
+  }
+
+  /**
+   * 注入的 fetch（测试用）；默认为全局 fetch。
+   *
+   * ⚠ 必须是 getter 而非构造期赋值：构造期求值会把 `globalThis.fetch` 冻结成
+   * 当时的引用，使运行时装上的 fetch 补丁（billion-context 上下文压缩代理即靠
+   * 此接管模型流量）对本适配器发出的请求失效 —— 表现为压缩静默不生效。
+   * 与 `src/buddy-auth.ts` 的既有写法保持一致。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.options.fetchImpl ?? fetch
   }
 
   /**

@@ -1,0 +1,555 @@
+/**
+ * Jet Hub RPC —— 账号端点（`account.*`）。
+ *
+ * 从 `src/jet-hub-rpc.ts` 的巨型 `switch`（P1-⑤ 纯结构重构）按领域整体搬出，
+ * **分支体逐字节保持原样**。其中 `account.create` 一个分支就占了原 switch 的
+ * 约六分之一（13+2 个 provider 的登录起步分支），单独拆文件后门面才可读。
+ *
+ * 依赖全部经 `deps` 注入：门面仍要 import 本模块，从本模块反向 import 门面的
+ * 助手会形成运行时环（`account.create` 要用 `shortId` / 各 `parseXxxCredential`）。
+ */
+
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type { QoderAuth } from '../qoder-auth.js'
+import type { TraeAuth } from '../trae-auth.js'
+import { LOOMY } from '../loomy-product.js'
+import type { LoomyAuth } from '../loomy-auth.js'
+import type { LoomyCredential } from '../loomy.js'
+import { RACCOON } from '../raccoon-product.js'
+import type { RaccoonCredential } from '../raccoon.js'
+import type { StartedRaccoonLoginFlow } from '../raccoon-login-page.js'
+import { LOBSTERAI } from '../lobsterai-product.js'
+import { QODER, QODER_CN } from '../qoder-product.js'
+import { TRAE, TRAE_INTL } from '../trae-product.js'
+import { CLINE } from '../cline-product.js'
+import { isLobsteraiRefreshable, lobsteraiCredentialExpiresAtMs } from '../lobsterai.js'
+import { fetchQoderUserNickname, isQoderRefreshable, qoderCredentialExpiresAtMs, withQoderNickname } from '../qoder.js'
+import { isTraeRefreshable, traeCredentialExpiresAtMs } from '../trae.js'
+import { clineCredentialExpiresAtMs, isClineRefreshable } from '../cline.js'
+import { decorateLoginUrl, fetchAuthState, runBuddyLoginFlow } from '../buddy-oauth.js'
+import { credentialExpiresAtMs } from '../buddy.js'
+import { CODEBUDDY_INTL, WORKBUDDY_CN, productById } from '../product.js'
+import { resetAccount, resetAllAccounts, retestAccount, retestAllAccounts } from '../account-probe.js'
+import type { RpcListAccountsRequest, RpcCreateAccountRequest, RpcUpdateAccountRequest, RpcDeleteAccountRequest, RpcReorderAccountsRequest, RpcRefreshAccountRequest, RpcRetestAccountRequest, RpcRetestAllRequest, RpcResetAccountRequest, RpcResetAllRequest } from '../types.js'
+import type { RpcResult, JetHubRpcContext, JetHubRpcServices, JetHubRegionRouting, JetHubCredentialHelpers } from './contracts.js'
+
+/** `account.*` 端点处理器所需依赖（由 `src/jet-hub-rpc.ts` 装配）。 */
+export type AccountEndpointDeps = JetHubRpcContext
+  & Pick<JetHubRpcServices, 'codearts' | 'buddy' | 'buddyIntl' | 'workbuddy' | 'workbuddyCn' | 'lobsterai' | 'qoder' | 'qoderCn' | 'trae' | 'traeIntl' | 'cline' | 'loomy' | 'raccoon'>
+  & Pick<JetHubRegionRouting, 'buddyAuthForProduct' | 'qoderAuthForProduct' | 'traeAuthForProduct' | 'isQoderProvider' | 'isTraeProvider'>
+  & Pick<JetHubCredentialHelpers, 'shortId' | 'parseBuddyCredential' | 'parseCodeArtsCredential' | 'parseLobsteraiCredential' | 'parseQoderCredential' | 'parseTraeCredential' | 'parseClineCredential' | 'buildRaccoonNickname'>
+
+/** 处理 `account.*` 端点方法。 */
+export async function handleAccountMethod(
+  method: string,
+  payload: unknown,
+  deps: AccountEndpointDeps,
+  _signal: AbortSignal,
+): Promise<RpcResult> {
+  const { ctx, pool, codearts, buddy, buddyIntl, workbuddy, workbuddyCn, lobsterai, qoder,
+    qoderCn, trae, traeIntl, cline, loomy, raccoon, buddyAuthForProduct,
+    qoderAuthForProduct, traeAuthForProduct, isQoderProvider, isTraeProvider, shortId,
+    parseBuddyCredential, parseCodeArtsCredential, parseLobsteraiCredential,
+    parseQoderCredential, parseTraeCredential, parseClineCredential, buildRaccoonNickname, } = deps
+
+  switch (method) {
+      case 'account.list': {
+        const req = payload as RpcListAccountsRequest
+        const accounts = await pool.listAccounts(req.provider)
+        return { ok: true, value: { accounts } }
+      }
+      case 'account.create': {
+        const req = payload as RpcCreateAccountRequest
+        const { provider } = req
+        const id = `${provider}-${shortId()}`
+        const suffix = shortId().toUpperCase()
+        const refPrefix = provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+        const refName = `${refPrefix}_ACCOUNT_${suffix}`
+
+        // CodeBuddy 系（buddy / workbuddy）共用两步登录流程：
+        // 只获取 loginUrl 和 state 立即返回，后台用同一个 state 异步执行
+        // 完整登录流程。两者的差异只在产品配置（platform、登录 URL 附加
+        // 参数、X-Product-Code、User-Agent），全部由 product 承载。
+        const product = productById(provider)
+        if (product !== undefined) {
+          let state: string
+          let authUrl: string
+          try {
+            const authState = await fetchAuthState(undefined, undefined, product)
+            state = authState.state
+            // WorkBuddy 的登录 URL 需要追加 version 与 loginSessionId
+            authUrl = decorateLoginUrl(authState.authUrl, product)
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error)
+            throw new Error(`无法获取 ${product.displayName} 登录地址（Host 网络请求失败）：${reason}`)
+          }
+          const ref = credentialRef(refName)
+          // 先在 pool 中添加启用的占位条目（无凭据），方便客户端 login.poll 检测到
+          await pool.addAccount({
+            id,
+            provider: product.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          // 后台异步执行完整登录流程，使用同一个 state
+          runBuddyLoginFlow({ openBrowser: () => {}, state, product }).then(async (flow) => {
+            await ctx.credentials.set(ref, flow.access)
+            // 续期定时器归属该产品自己的服务实例
+            buddyAuthForProduct(product.id)?.scheduleRefresh()
+            const credential = parseBuddyCredential(flow.access)
+            await pool.updateAccount(id, {
+              nickname: credential?.nickname ?? id,
+              // Buddy 的 expires_at 是字符串形式的毫秒时间戳，
+              // 必须用 credentialExpiresAtMs 解析（Date.parse 对纯数字串会得到 NaN）。
+              expiresAt: credential ? credentialExpiresAtMs(credential) : undefined,
+              refreshable: Boolean(credential?.refresh_token),
+            })
+          }).catch((err) => {
+            ctx.logger.warn(`[jet-hub] background ${product.id} login failed for ${id}: ${err}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: authUrl } }
+        } else if (provider === 'codearts') {
+          // CodeArts 也是**回调式**登录（本地回调服务器收授权码），但同样必须
+          // 走两步式：先返回 loginUrl 让前端立刻 window.open，后台再等回调。
+          //
+          // 为什么不能像早期那样 await 整个流程（真实缺陷）：浏览器只在用户
+          // 点击后的短暂窗口（transient activation，约 5 秒）内允许 window.open。
+          // 阻塞数十秒后才返回 URL，弹窗必被拦截并返回 null，前端兜底逻辑
+          // 便执行 `window.location.href = loginUrl`，把整个设置页跳走
+          // ——用户报的「主页面直接跳转过去了」正是此因。
+          const started = await codearts.startLogin({ refName })
+          // 先登记启用的占位条目（无凭据），使前端 login.poll 能立即看到该账号；
+          // 登录成功后再回填昵称/有效期等真实字段。
+          await pool.addAccount({
+            id,
+            provider: 'codearts',
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          started.result.then(async (loginResult) => {
+            const credential = parseCodeArtsCredential(loginResult.access)
+            await pool.updateAccount(id, {
+              nickname: credential?.user_name !== undefined && credential.user_name.length > 0
+                ? credential.user_name
+                : id,
+              expiresAt: credential?.expires_at !== undefined
+                ? (Number.isNaN(Date.parse(credential.expires_at)) ? undefined : Date.parse(credential.expires_at))
+                : undefined,
+              refreshable: Boolean(credential?.refresh_token),
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background codearts login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (provider === LOBSTERAI.id) {
+          // LobsterAI 与 codearts 同款：回调式登录 + 两步式返回，
+          // 理由见上面的 codearts 分支（弹窗拦截导致主页面被跳转）。
+          const started = await lobsterai.startLogin({ refName })
+          await pool.addAccount({
+            id,
+            provider: LOBSTERAI.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          started.result.then(async (loginResult) => {
+            const credential = parseLobsteraiCredential(loginResult.access)
+            await pool.updateAccount(id, {
+              nickname: credential?.nickname !== undefined && credential.nickname.length > 0
+                ? credential.nickname
+                : id,
+              expiresAt: credential !== undefined ? lobsteraiCredentialExpiresAtMs(credential) : undefined,
+              refreshable: credential !== undefined && isLobsteraiRefreshable(credential),
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${LOBSTERAI.id} login failed for ${id}: ${String(error)}`)
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (isQoderProvider(provider)) {
+          // Qoder 与 codearts / lobsterai 同款两步式，但登录机制不同：
+          // 它是**设备码轮询**（不开本地回调服务器，见 src/qoder-oauth.ts），
+          // 同样必须在用户授权前返回 loginUrl，理由见上面的 codearts 分支。
+          // 按 `provider` 取对应区域的服务实例（国际版 / 国内版端点不同）。
+          const qoderAuth = qoderAuthForProduct(provider) as QoderAuth
+          const started = await qoderAuth.startLogin({ refName })
+          // 先登记启用的占位条目（无凭据），使前端 login.poll 能立即看到该账号；
+          // 登录成功后再回填昵称/有效期等真实字段。
+          await pool.addAccount({
+            id,
+            provider,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          started.result.then(async (loginResult) => {
+            const credential = parseQoderCredential(loginResult.access)
+            // ⚠️ 设备码轮询响应**不带 `user_name`**，故 `credential.nickname` 恒为空
+            // —— 必须补一次 userinfo 才能拿到真实名字，否则账号卡片只能显示
+            // `qoder-xxxx`（多账号无法区分）。见 `fetchQoderUserNickname` 的说明。
+            //
+            // ⚠️ **失败不阻塞登录**：昵称只是展示信息，拿不到就退回账号 id
+            //（与 `toLoginFlowResult` 对过期时间的处理同原则）。
+            let nickname = credential?.nickname
+            if ((nickname === undefined || nickname.length === 0) && credential !== undefined) {
+              nickname = await fetchQoderUserNickname(credential, QODER)
+              // 写回**凭据**（不只账号条目）：账号条目会随 Jet Hub 的账号操作
+              // 整体重写，而凭据里存一份才能在续期后与其它面板都稳定拿到。
+              if (nickname !== undefined && loginResult.access.length > 0) {
+                const updated = withQoderNickname(credential, nickname)
+                await ctx.credentials.set(credentialRef(refName), JSON.stringify(updated))
+              }
+            }
+            await pool.updateAccount(id, {
+              nickname: nickname !== undefined && nickname.length > 0 ? nickname : id,
+              expiresAt: credential !== undefined ? qoderCredentialExpiresAtMs(credential) : undefined,
+              refreshable: credential !== undefined && isQoderRefreshable(credential),
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${provider} login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (isTraeProvider(provider)) {
+          // TRAE 回调式登录 + 两步式返回（与 LobsterAI / codearts 同因）。
+          const traeAuth = traeAuthForProduct(provider) as TraeAuth
+          const started = await traeAuth.startLogin({ refName })
+          // 先登记启用的占位条目（无凭据），使前端 login.poll 能立即看到该账号；
+          // 登录成功后再回填昵称/有效期等真实字段。
+          await pool.addAccount({
+            id,
+            provider,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          started.result.then(async (loginResult) => {
+            const credential = parseTraeCredential(loginResult.access)
+            await pool.updateAccount(id, {
+              nickname: credential?.nickname !== undefined && credential.nickname.length > 0
+                ? credential.nickname
+                : id,
+              expiresAt: credential !== undefined ? traeCredentialExpiresAtMs(credential) : undefined,
+              refreshable: credential !== undefined && isTraeRefreshable(credential),
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${provider} login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (provider === CLINE.id) {
+          // Cline 是 **WorkOS 设备码轮询**登录（见 src/cline-oauth.ts）：
+          // 与 Qoder 同为「不开本地回调服务器」的轮询式，但判据形态不同 ——
+          // Qoder 看 HTTP 404，Cline 看响应体的 `error: authorization_pending`。
+          //
+          // ⚠️ 与 Qoder 的另一处差异：`startLogin` 内部要先发一次
+          // `POST {workOsBase}/user_management/authorize/device` 拿到设备码，
+          // 才能返回 loginUrl（Qoder 的 URL 是纯本地构造的）。那只是一次
+          // 快速 POST，仍远快于浏览器手势窗口，故两步式的理由与 Qoder 一致。
+          const started = await cline.startLogin({ refName })
+          // 先登记启用的占位条目（无凭据），使前端 login.poll 能立即看到该账号；
+          // 登录成功后再回填昵称/有效期等真实字段。
+          await pool.addAccount({
+            id,
+            provider: CLINE.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+          started.result.then(async (loginResult) => {
+            const credential = parseClineCredential(loginResult.access)
+            await pool.updateAccount(id, {
+              nickname: credential?.nickname !== undefined && credential.nickname.length > 0
+                ? credential.nickname
+                : id,
+              expiresAt: credential !== undefined ? clineCredentialExpiresAtMs(credential) : undefined,
+              refreshable: credential !== undefined && isClineRefreshable(credential),
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${CLINE.id} login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (provider === LOOMY.id) {
+          // Loomy 走**微信扫码**登录（与其余 provider 同为「两步式」）：
+          // 起本地服务器承载弹窗页（内联二维码 + 轮询 + 首次绑手机号表单），
+          // 立即返回 `loginUrl` 让前端 `window.open`。
+          //
+          // ⚠️ **真实缺陷**（用户报障「新建账号失败：Loomy 短信登录需要手机号」）：
+          // 早期实现要求 `account.create` **必须带 phone**，但表单要等它返回
+          // `loginMode:'sms'` 才渲染 —— 用户根本没机会输入手机号，直接报错，
+          // 表单永远出不来。**顺序死锁**。改用微信扫码后此矛盾消失：
+          // 手机号只在「首次扫码」时由弹窗页自己收集。
+          //
+          // ⚠️ 先登记**占位条目**（无凭据），使前端 `login.poll` 能立即看到该账号；
+          // 登录成功后再回填昵称/有效期。
+          await pool.addAccount({
+            id,
+            provider: LOOMY.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+
+          let started
+          try {
+            started = await loomy.startWechatLogin()
+          } catch (error) {
+            // 取二维码 uuid 失败（网络/页面结构变化）：删掉占位条目，不留幽灵账号。
+            void pool.removeAccount(id).catch(() => {})
+            const reason = error instanceof Error ? error.message : String(error)
+            throw new Error(`无法启动 Loomy 微信登录（获取二维码失败）：${reason}`)
+          }
+
+          started.result.then(async (login) => {
+            const result = await loomy.persistWechatLogin(login, { refName })
+            const credential = JSON.parse(result.access) as LoomyCredential
+            await pool.updateAccount(id, {
+              // 用手机号尾号让多账号可区分（Loomy 无独立昵称接口；
+              // 微信昵称可能有，优先用它）。
+              nickname: login.nickname !== undefined && login.nickname.length > 0
+                ? login.nickname
+                : credential.phone.length >= 4
+                  ? `Loomy ${credential.phone.slice(-4)}`
+                  : id,
+              expiresAt: result.expires > 0 ? result.expires : undefined,
+              // ⚠️ 恒 false：Loomy 无续期端点。
+              refreshable: false,
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${LOOMY.id} wechat login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+
+          return { ok: true, value: { accountId: id, loginUrl: started.loginUrl } }
+        } else if (provider === RACCOON.id) {
+          // raccoon 走**本地页承载**的微信扫码 / 短信双路径登录（与 Loomy 同型）：
+          // `startLogin` 立即返回指向 127.0.0.1 的 `loginUrl`，后台 await 结果。
+          //
+          // ⚠️ 绝不能在用户授权完成后才返回 loginUrl —— `window.open` 只在
+          //    用户手势窗口内有效，那时手势早已过期、弹窗必被拦截。
+          //
+          // ⚠️ 先登记**占位条目**（无凭据），使前端 `login.poll` 能立即看到该账号；
+          //    登录成功后再回填昵称与 refreshable。失败则删除占位条目。
+          await pool.addAccount({
+            id,
+            provider: RACCOON.id,
+            nickname: id,
+            enabled: true,
+            credentialRef: refName,
+            refreshable: false,
+            createdAt: Date.now(),
+          })
+
+          let raccoonStarted: StartedRaccoonLoginFlow
+          try {
+            raccoonStarted = await raccoon.startLogin()
+          } catch (error) {
+            // 起本地服务器失败：删掉占位条目，不留幽灵账号。
+            void pool.removeAccount(id).catch(() => {})
+            const reason = error instanceof Error ? error.message : String(error)
+            throw new Error(`无法启动 Raccoon 登录（本地登录页启动失败）：${reason}`)
+          }
+
+          raccoonStarted.result.then(async (credential) => {
+            const result = await raccoon.persistLogin(credential, { refName })
+            const saved = JSON.parse(result.access) as RaccoonCredential
+            await pool.updateAccount(id, {
+              // ⚠️ 服务端的 `name` 是**自动生成的默认名**（本机账号是
+              // `RaccoonAva`，即「Raccoon」+ 随机串），微信扫码**不回传微信昵称**
+              //（`wechat_bindings` 只有绑定 id 与时间，无昵称/头像）。
+              // 它是账号的**正式名字**（JWT payload 里也有 `name`，官方客户端
+              // 就显示它），故**保留**；但若注册第二个账号，服务端很可能又给一个
+              // 相近的默认名 → 多账号重名、无法区分。
+              //
+              // 故追加**手机号尾号**消歧：`RaccoonAva (6665)`。
+              // 与 Loomy 的 `Loomy 2222` 同策略（那边没有真实名字可用，
+              // 这边有，所以保留原名再挂尾号）。
+              nickname: buildRaccoonNickname(saved, id),
+              expiresAt: result.expires > 0 ? result.expires : undefined,
+              // ⚠️ raccoon **有** refresh 端点，与 Loomy（恒 false）不同。
+              refreshable: result.refreshable,
+            })
+          }).catch((error: unknown) => {
+            ctx.logger.warn(`[jet-hub] background ${RACCOON.id} login failed for ${id}: ${String(error)}`)
+            // 登录失败：移除占位条目，避免留下无凭据的幽灵账号
+            void pool.removeAccount(id).catch(() => {})
+          })
+
+          return { ok: true, value: { accountId: id, loginUrl: raccoonStarted.loginUrl } }
+        } else {
+          return { ok: false, error: { code: 'bad-request', message: `unknown provider: ${provider}` } }
+        }
+      }
+      case 'account.update': {
+        const req = payload as RpcUpdateAccountRequest
+        await pool.updateAccount(req.accountId, req.patch)
+        return { ok: true, value: undefined }
+      }
+      case 'account.delete': {
+        const req = payload as RpcDeleteAccountRequest
+        await pool.removeAccount(req.accountId)
+        return { ok: true, value: undefined }
+      }
+      // 拖拽排序：重写该 provider 账号在池中的顺序。
+      // 该顺序是自动选号与限流换号的候选优先级，因此不是纯 UI 操作。
+      case 'account.reorder': {
+        const req = payload as RpcReorderAccountsRequest
+        if (typeof req.provider !== 'string' || req.provider.length === 0) {
+          return { ok: false, error: { code: 'bad-request', message: 'provider 必填' } }
+        }
+        if (!Array.isArray(req.orderedIds) || req.orderedIds.some(id => typeof id !== 'string')) {
+          return { ok: false, error: { code: 'bad-request', message: 'orderedIds 必须是字符串数组' } }
+        }
+        try {
+          await pool.reorderAccounts(req.provider, req.orderedIds)
+        } catch (error) {
+          // 集合不一致（前端列表过期）是可预期的并发情况，回可读错误让用户
+          // 刷新重试，而不是抛成 jet-hub/handler-failed 那种「未知故障」。
+          return {
+            ok: false,
+            error: {
+              code: 'bad-request',
+              message: error instanceof Error ? error.message : String(error),
+            },
+          }
+        }
+        return { ok: true, value: undefined }
+      }
+      case 'account.refresh': {
+        const req = payload as RpcRefreshAccountRequest
+        try {
+          const accounts = await pool.listAllAccounts()
+          const entry = accounts.find((a) => a.id === req.accountId)
+          if (!entry) throw new Error(`Account ${req.accountId} not found`)
+
+          // 按 **entry.provider** 分派到对应服务，并调用**按凭据 ref 的**
+          // 续期入口 —— 两处都是修复既有缺陷的关键：
+          //
+          // 1. 原实现只处理 codearts / buddy，`workbuddy` 会落到 else 抛
+          //    `Unknown provider`，即 WorkBuddy 账号卡片的「刷新」按钮一直是坏的；
+          // 2. 原实现调的是 `service.refresh()`，它读写的是该 provider 的
+          //    **默认单凭据 ref**（如 BUDDY_ACCESS_TOKEN），而账号卡片对应的是
+          //    BUDDY_ACCOUNT_XXX —— 于是「刷新这个账号」实际刷的是另一个凭据，
+          //    结果要么报错要么静默改了错的对象。
+          switch (entry.provider) {
+            case 'codearts':
+              await codearts.refreshAccountCredential(entry.credentialRef)
+              break
+            case 'buddy':
+              await buddy.refreshAccountCredential(entry.credentialRef)
+              break
+            case CODEBUDDY_INTL.id:
+              // ⚠️ 早期漏了这一条：`buddy-intl` 账号的「刷新」会落到 default
+              // 抛 `Unknown provider`。
+              await buddyIntl.refreshAccountCredential(entry.credentialRef)
+              break
+            case 'workbuddy':
+              await workbuddy.refreshAccountCredential(entry.credentialRef)
+              break
+            case WORKBUDDY_CN.id:
+              // ⚠️ 早期漏了这一条：`workbuddy-cn` 账号卡片的「刷新」按钮会落到
+              // default 分支抛 `Unknown provider`（与 WorkBuddy 那个历史缺陷同类）。
+              await workbuddyCn.refreshAccountCredential(entry.credentialRef)
+              break
+            case LOBSTERAI.id:
+              await lobsterai.refreshAccountCredential(entry.credentialRef)
+              break
+            case QODER.id:
+              await qoder.refreshAccountCredential(entry.credentialRef)
+              break
+            case QODER_CN.id:
+              await qoderCn.refreshAccountCredential(entry.credentialRef)
+              break
+            case TRAE.id:
+              await trae.refreshAccountCredential(entry.credentialRef)
+              break
+            case TRAE_INTL.id:
+              await traeIntl.refreshAccountCredential(entry.credentialRef)
+              break
+            case CLINE.id:
+              await cline.refreshAccountCredential(entry.credentialRef)
+              break
+            case LOOMY.id:
+              // ⚠️ Loomy **没有 refresh 端点**：这里只能做**有效性探测**，
+              // 失效时抛「请重新登录」。见 LoomyAuth.refreshAccountCredential。
+              await loomy.refreshAccountCredential(entry.credentialRef)
+              break
+            case RACCOON.id:
+              // raccoon **有** refresh 端点（refresh_token 轮换），这里是真续期。
+              // ⚠️ 只读写传入的 ref，不碰默认单凭据 ref。
+              // ⚠️ **必须传 pool + entry.id**：续期后要把新的 `expiresAt` 写回
+              // 账号池，否则 UI 一直显示「已过期」（真实缺陷：JWT 已续到 15:09、
+              // 账号池仍是 12:02，相差 3.1 小时，但功能完全正常）。
+              await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id)
+              break
+            default:
+              throw new Error(`Unknown provider: ${entry.provider}`)
+          }
+          return { ok: true, value: { success: true } }
+        } catch (error) {
+          return {
+            ok: true,
+            value: {
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          }
+        }
+      }
+      // ── 限流标记：重测（发真实请求验证）──
+      // 标记只反映"上一次 429 时的快照"，服务端常在重置时间前提前放行。
+      // 重测发一次最小对话请求：正常返回才清除标记，仍受限则保留并回报原因。
+      case 'account.retest': {
+        const req = payload as RpcRetestAccountRequest
+        const account = await retestAccount(pool, req.accountId)
+        return {
+          ok: true,
+          value: { accounts: [account], clearedCount: account.cleared.length },
+        }
+      }
+      // 重测该 provider 下的全部账号。**包含已停用账号**——用户明确要求
+      // 停用账号也能重测（停用只影响自动选择，不影响手动排查）。
+      case 'account.retestAll': {
+        const req = payload as RpcRetestAllRequest
+        const value = await retestAllAccounts(pool, req.provider)
+        return { ok: true, value }
+      }
+      // ── 限流标记：重置（不发请求，直接清除）──
+      case 'account.reset': {
+        const req = payload as RpcResetAccountRequest
+        const value = await resetAccount(pool, req.accountId)
+        return { ok: true, value }
+      }
+      case 'account.resetAll': {
+        const req = payload as RpcResetAllRequest
+        const value = await resetAllAccounts(pool, req.provider)
+        return { ok: true, value }
+      }
+      default: return { ok: false, error: { code: 'bad-request', message: `unknown method: ${method}` } }
+    }
+  }

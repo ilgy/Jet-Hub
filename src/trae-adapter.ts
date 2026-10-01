@@ -46,6 +46,7 @@ import {
 } from './trae.js'
 import { TRAE, type TraeFallbackModel, type TraeProduct } from './trae-product.js'
 import { classifyTraeError, recordsTraeRateLimit, shouldRotateTraeAccount } from './trae-errors.js'
+import { errorDetail, httpErrorCode } from './http-error.js'
 import { normalizeHarnessMessages } from './message-shape.js'
 import { createBlankReasoningSuppressor, createReasoningLoopDetector, hasUsableToolName, isReasoningLoopGuardEnabled, isTruncatedArguments, normalizeToolArguments, readWithIdleTimeout, resolveEmptyResponseReason, resolveToolPairing, splitThinkTaggedContent, stripCourseLeakFromHistoryContent, stripCourseLeakIfEnabled } from './sse.js'
 
@@ -445,28 +446,15 @@ function serializeTraeMessages(
   return wire
 }
 
-/** 从错误体提取可读 detail 文本。 */
-function errorDetail(body: string): string {
-  try {
-    const data = JSON.parse(body) as Record<string, unknown>
-    const parts = [
-      typeof data.code === 'number' || typeof data.code === 'string' ? `code=${String(data.code)}` : undefined,
-      typeof data.message === 'string' ? data.message : undefined,
-      typeof data.msg === 'string' ? data.msg : undefined,
-    ].filter((value): value is string => value !== undefined)
-    if (parts.length > 0) return parts.join(' ')
-  } catch { /* 非 JSON 错误体 */ }
-  return body
-}
-
-/** HTTP 状态码映射。 */
-function httpErrorCode(status: number): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) return 'INVALID_REQUEST'
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
-}
+/**
+ * 错误报文归一化与状态码分类：统一实现见 `src/http-error.ts`。
+ *
+ * 本文件原有一份**不看报文**的 `httpErrorCode(status)` —— 它把 400 一律归为
+ * `INVALID_REQUEST`，于是「提示词超出模型上下文窗口」这个可由自动压缩恢复的
+ * 情况，在 trae 上会直接把裸错误抛给用户（详见 http-error.ts 的文件头）。
+ * 现改为导入共享实现，判定看**完整报文**。
+ */
+// errorDetail / httpErrorCode 由共享层提供（见上方说明）。
 
 /**
  * 组合 SOLO **流内** `event:error` 的文案。
@@ -539,7 +527,6 @@ export function traeDisplayName(model: TraeRemoteModel): string {
  */
 export class TraeAdapter extends LlmAdapter {
   private readonly product: TraeProduct
-  private readonly fetchImpl: typeof fetch
   /** 动态模型缓存。 */
   private remoteModels: TraeRemoteModel[] | undefined
   /** 远端模型元数据索引。 */
@@ -555,10 +542,21 @@ export class TraeAdapter extends LlmAdapter {
   constructor(private readonly options: TraeAdapterOptions) {
     super()
     this.product = options.product ?? TRAE
-    this.fetchImpl = options.fetchImpl ?? fetch
     this.fallbackIndex = new Map(
       (this.product.fallbackModels ?? []).map((model) => [model.id, model]),
     )
+  }
+
+  /**
+   * 注入的 fetch（测试用）；默认为全局 fetch。
+   *
+   * ⚠ 必须是 getter 而非构造期赋值：构造期求值会把 `globalThis.fetch` 冻结成
+   * 当时的引用，使运行时装上的 fetch 补丁（billion-context 上下文压缩代理即靠
+   * 此接管模型流量）对本适配器发出的请求失效 —— 表现为压缩静默不生效。
+   * 与 `src/buddy-auth.ts` 的既有写法保持一致。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.options.fetchImpl ?? fetch
   }
 
   providerInfo(provider: string): LlmProviderInfo {
@@ -1014,7 +1012,7 @@ export class TraeAdapter extends LlmAdapter {
         }
         throw new LlmError(
           `trae: 模型 ${options.model} 所有账号均不可用（${errorDetail(errorText)}）`,
-          lastKind === 'quota-exceeded' ? 'QUOTA_EXCEEDED' : httpErrorCode(lastStatus),
+          lastKind === 'quota-exceeded' ? 'QUOTA_EXCEEDED' : httpErrorCode(lastStatus, errorText),
           { status: lastStatus },
         )
       }
@@ -1022,7 +1020,7 @@ export class TraeAdapter extends LlmAdapter {
       if (lastKind === 'quota-exceeded') {
         throw new LlmError(`trae: 积分不足（${errorDetail(errorText)}）`, 'QUOTA_EXCEEDED', { status: lastStatus })
       }
-      throw new LlmError(`trae: ${errorDetail(errorText)}`, httpErrorCode(lastStatus), { status: lastStatus })
+      throw new LlmError(`trae: ${errorDetail(errorText)}`, httpErrorCode(lastStatus, errorText), { status: lastStatus })
     }
 
     // 5. 消费 SSE 流（SOLO → OpenAI 转换）
@@ -1043,7 +1041,7 @@ export class TraeAdapter extends LlmAdapter {
         response = await this.send(credential, body, options)
         if (!response.ok) {
           const text = await response.text().catch(() => '')
-          throw new LlmError(`trae: ${errorDetail(text)}`, httpErrorCode(response.status), { status: response.status })
+          throw new LlmError(`trae: ${errorDetail(text)}`, httpErrorCode(response.status, text), { status: response.status })
         }
       }
     }

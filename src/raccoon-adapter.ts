@@ -21,7 +21,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
-import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
+import {
+  LlmAdapter,
+  LlmError,
+} from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
   LlmModelInfo,
@@ -101,7 +104,6 @@ export interface RaccoonAdapterOptions {
 /** Raccoon Work 模型适配器。 */
 export class RaccoonAdapter extends LlmAdapter {
   private readonly product: RaccoonProduct
-  private readonly fetchImpl: typeof fetch
   /** 兜底模型索引（id → 条目）。 */
   private readonly fallbackIndex: ReadonlyMap<string, RaccoonFallbackModel>
   /** 远端模型缓存；未拉取时为 undefined。 */
@@ -110,8 +112,19 @@ export class RaccoonAdapter extends LlmAdapter {
   constructor(private readonly options: RaccoonAdapterOptions) {
     super()
     this.product = options.product ?? RACCOON
-    this.fetchImpl = options.fetchImpl ?? fetch
     this.fallbackIndex = new Map(this.product.fallbackModels.map((model) => [model.id, model]))
+  }
+
+  /**
+   * 注入的 fetch（测试用）；默认为全局 fetch。
+   *
+   * ⚠ 必须是 getter 而非构造期赋值：构造期求值会把 `globalThis.fetch` 冻结成
+   * 当时的引用，使运行时装上的 fetch 补丁（billion-context 上下文压缩代理即靠
+   * 此接管模型流量）对本适配器发出的请求失效 —— 表现为压缩静默不生效。
+   * 与 `src/buddy-auth.ts` 的既有写法保持一致。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.options.fetchImpl ?? fetch
   }
 
   /**
@@ -342,7 +355,15 @@ export class RaccoonAdapter extends LlmAdapter {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '')
-      throw new LlmError(`raccoon: ${errorDetail(errorText)}`, httpErrorCode(response.status), { status: response.status })
+      // 400 必须看**响应体**才能区分「上下文超限」与「普通请求错误」：前者归为
+      // CONTEXT_WINDOW_EXCEEDED 才会触发 DSH 的 context-overflow 自动压缩恢复
+      // （dsh-compaction-basic 监听 `agent/request-error`，只对
+      // `failure.code === CONTEXT_WINDOW_EXCEEDED` 的失败压缩上下文并重试）。
+      //
+      // 该判定现已统一在 `src/http-error.ts`（openai-compat 家族共同导入），
+      // 因此这里不再需要内联分支 —— 与 buddy 的 `httpErrorCode(status, body)`
+      // 是同一份实现、同一判定口径。
+      throw new LlmError(`raccoon: ${errorDetail(errorText)}`, httpErrorCode(response.status, errorText), { status: response.status })
     }
 
     // ⚠️ 业务失败也可能以 HTTP 200 + SSE 内嵌错误帧返回，由 consumeOpenAiSse 处理。

@@ -13,7 +13,8 @@
 - **buddy（腾讯 CodeBuddy 国内版）** / **buddy-intl（国际版）** — 见
   [buddy provider](#buddy-provider)；国内版支持「一键领取积分」（每日签到）。
 - **workbuddy-cn（腾讯 WorkBuddy 国内版）** / **workbuddy（国际版）** — 见
-  [WorkBuddy provider](#workbuddy-provider)。国内版后端同样没有签到接口。
+  [WorkBuddy provider](#workbuddy-provider)。**国内版支持「一键领取积分」
+  （每日签到）**；国际版该区域活动位不下发，故不显示该按钮。
 - **lobsterai（有道 LobsterAI / 龙虾）** — 见 [LobsterAI provider](#lobsterai-provider)；
   另支持「一键领取积分」（每日签到）。
 - **qoder（阿里系 Qoder 国际版）** / **qoder-cn（国内版）** — 见
@@ -783,12 +784,21 @@ Hy3 · x0.05 X                      (hy3-x)
 轮询 `login/account`），仅身份标识与端点按上表区分。`X-Product-Code` 为
 `workbuddy`，`X-Domain` 随 `apiDomain` 切换为 `www.workbuddy.ai`。
 
-**没有每日签到积分**：国际版后端不提供**签到**接口（内核中只有
-`/v2/billing/meter/get-dosage-notify` 用量通知），因此 Jet Hub 的 WorkBuddy
-面板**不显示「一键领取积分」按钮**；签到领取在 CodeBuddy 面板完成。
+**国际版没有签到活动（但接口是有的）**：2026-10-01 实测修正 —— 国际版
+（`www.workbuddy.ai`）**存在** `checkin-activity-status` / `daily-checkin`
+两个端点（对照组探针确证：候选路径 401 vs 随机路径 404），但该区域的
+**活动位不下发**：状态返回 `active:false` / `total_credits:0` / `start_time:""`，
+领取返回 `code 10001`「签到活动未开启或已过期」。因此 Jet Hub 的 **workbuddy
+（国际版）**面板不显示「一键领取积分」按钮。
+
+> ⚠️ 旧文档称「国际版后端不提供签到接口（内核中只有 `get-dosage-notify`）」——
+> 这个理由**已被实测证伪**（内核字面量是打包器视角，而这两个端点由 IDE 前端
+> 直接调用）。结论（不显示按钮）不变，理由改为「本区域无活动」。
+> **对照：国内版 `workbuddy-cn` 同路径、同请求头，实测有活动**（连续 2 天、
+> 每日 100 积分、`total_credits:200`），故国内版**显示**该按钮。
 
 > **但积分余额（Credits Balance）可以查。** 签到与余额是两项独立能力：国际版
-> 确实没有签到，但**有**积分余额查询接口，见下节。不要因为"没有签到"就推断
+> 没有签到**活动**，但**有**积分余额查询接口，见下节。不要因为"没有签到"就推断
 > 也查不到余额。
 
 - **登录入口：Jet Hub 设置页的 WorkBuddy 面板**（支持多账号与账号池自动切换）。
@@ -990,7 +1000,15 @@ GET {snapEngineUrl}/snap-manager/v1/statistics/plugin
 ### 一键领取积分（每日签到）
 
 **四个 provider 中三个提供**该按钮（三套签到协议完全不同，实现各自独立）。
-WorkBuddy 国际版后端没有签到接口，故其面板不显示。
+WorkBuddy 国际版该区域的活动位不下发（端点存在），故其面板不显示。
+
+> ⚠️ **WorkBuddy 国内版（`workbuddy-cn`）提供这个按钮。** 它曾因能力矩阵
+> 误登记为 `dailyCheckin:false` 而**不显示** —— 2026-10-01 用真实凭据实测
+> 修正：`POST https://copilot.tencent.com/v2/billing/meter/checkin-activity-status`
+> 返回 `{"code":0,"data":{"active":true,"today_checked_in":true,"streak_days":2,
+> "daily_credit":100,"total_credits":200,"activity_name":"Buddy应用","season":10}}`，
+> 即该区域自 2026-09-30 起有「Buddy加油站」活动。协议层无需改动
+> （`productById('workbuddy-cn')` 本就能解析），只是客户端门控没放行。
 
 在 Jet Hub 对应面板标题栏点击「**一键领取积分**」，插件会对该面板下
 **全部账号**顺序执行每日签到领取：

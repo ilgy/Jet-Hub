@@ -174,13 +174,17 @@ const PROVIDERS = Object.freeze([
  * 现在两项能力（balance / dailyCheckin）都在同一张表里显式登记，并在请求前判定。
  *
  * 各 provider 的签到来源：
- * - **buddy（CodeBuddy）**：签到接口位于腾讯中国区后端。
+ * - **buddy（CodeBuddy 国内版）/ buddy-intl（国际版）**：签到接口位于腾讯后端。
+ * - **workbuddy-cn（WorkBuddy 国内版）**：同一套签到协议（copilot.tencent.com），
+ *   实测有活动（连续 2 天、每日 100 积分）。⚠️ 旧注释称「workbuddy 无签到」
+ *   并把国内版一并否定，是把「国际版活动未开启」误推广成了「无接口」。
  * - **lobsterai（有道龙虾）**：签到接口是 `client-activities` 三步流程
  *   （实现见 `src/lobsterai-credits.ts`），经 `sigin.py` 实测确认。
  *
- * **workbuddy 无签到**：国际版（www.workbuddy.ai）后端没有签到接口
- * （内核中只有 `/v2/billing/meter/get-dosage-notify` 用量通知）。
- * CodeArts 是华为云账号体系，同样不参与。
+ * **workbuddy（国际版）无签到按钮**：不是没有接口（端点存在，对照组探针确证），
+ * 而是该区域**活动位不下发**（`active:false`，领取返回 `code 10001`
+ * 「签到活动未开启或已过期」）。
+ * CodeArts 是华为云账号体系，签到走自己的签名协议，与本注释无关。
  */
 
 function ProviderLogo({ provider }) {
@@ -1938,9 +1942,11 @@ export function JetHubPage({ close, rpcCall }) {
    * （并发易触发风控）」（见 `src/jet-hub-rpc.ts`），而这是**真实领积分**的
    * 写操作，跨渠道并发会同时发出多路领取请求，触发风控的代价是用户当天领不到。
    *
-   * 渠道集合由能力表推导（`checkinProviders()`）—— workbuddy / cline 后端
-   * 没有签到接口，**绝不能**出现在请求列表里（那会产生必然失败的请求，
-   * 正是 CodeArts 历史缺陷的形态）。
+   * 渠道集合由能力表推导（`checkinProviders()`）—— cline 后端没有签到接口、
+   * workbuddy（国际版）该区域活动位不下发，二者登记为 `dailyCheckin:false`，
+   * **绝不能**出现在请求列表里（那会产生必然失败的请求，正是 CodeArts 历史
+   * 缺陷的形态）。⚠️ 但 `workbuddy-cn`（国内版）**有**活动，登记为 true，
+   * 故新增 `workbuddy-cn` 的账号后会出现在这里。
    *
    * 单渠道失败只计入 failed，**不中断后续渠道**（与后端「单账号失败不中断
    * 整体」同型）。但后端对**无账号**的渠道本就是零请求，故不额外预查账号。

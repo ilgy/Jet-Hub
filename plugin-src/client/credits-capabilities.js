@@ -23,7 +23,7 @@
  * |-------------|---------------------|------------------------------|
  * | `codearts`  | ✓ 华为签名          | ✓ 华为签名                   |
  * | `buddy`     | ✓                   | ✓                            |
- * | `workbuddy` | ✓                   | ✗ 国际版后端无签到接口        |
+ * | `workbuddy` | ✓                   | ✗ 签到活动未开启（活动位本区域不下发） |
  * | `lobsterai` | ✓                   | ✓ `client-activities` 三步流程 |
  * | `qoder`     | ✓ `sash/api/v2/me/usage` | ✗ 未见签到接口            |
  * | `trae`      | ✓                   | ✓ `checkin_credits/*`        |
@@ -36,8 +36,9 @@
  *   Qoder 用 `GET /sash/api/v2/me/usage`（见 `src/qoder-credits.ts`）。
  *   见 README「积分余额」。
  * - `dailyCheckin`：CodeBuddy 系用 `checkin-activity-status` + `daily-checkin`
- *   （**仅 CodeBuddy 中国版**有；WorkBuddy 国际版内核里只有
- *   `get-dosage-notify` 用量通知）；LobsterAI 用 `client-activities` 的
+ *   （**国内系**均有：`buddy` / `buddy-intl` / `workbuddy-cn`；`workbuddy`
+ *   国际版端点也在，但该区域的活动位不下发 ⇒ `active:false`，故登记 false）；
+ *   LobsterAI 用 `client-activities` 的
  *   slot → context → check_in 三步（见 `src/lobsterai-credits.ts`）；
  *   CodeArts 用 `/v1/ops/delivery` + `/v1/ops/claim`(+`confirm`)
  *   （见 `src/codearts-credits.ts`）；Qoder 用
@@ -64,9 +65,24 @@ export const CREDITS_CAPABILITIES = Object.freeze({
   buddy: Object.freeze({ balance: true, dailyCheckin: true }),
   // CodeBuddy 国际版：与国内版同一套积分协议，仅端点不同（www.codebuddy.ai）。
   'buddy-intl': Object.freeze({ balance: true, dailyCheckin: true }),
+  // WorkBuddy 国际版（www.workbuddy.ai）：**端点存在但活动位不下发**。
+  // 2026-10-01 用真实凭据实测：该区域 `checkin-activity-status` 返回
+  // `active:false` / `total_credits:0` / `start_time:""`，`daily-checkin`
+  // 返回 `code 10001`「**签到活动未开启或已过期**」。
+  // ⚠️ 这里登记 false 是**结果正确、理由须改**：旧注释称「后端无签到接口」，
+  // 实测证伪（对照组探针：候选路径 401 vs 随机路径 404，端点确实存在）。
+  // 且 `code 10001` 在两个区域**语义不同** —— 国内系是「今天已签到，请明天
+  // 再来」，国际版是「活动未开启」，故不能只看 code 就断定已签到。
   workbuddy: Object.freeze({ balance: true, dailyCheckin: false }),
-  // WorkBuddy 国内版（copilot.tencent.com）：后端同样**没有**签到接口。
-  'workbuddy-cn': Object.freeze({ balance: true, dailyCheckin: false }),
+  // WorkBuddy 国内版（copilot.tencent.com）：**有真实可用的每日签到**。
+  // 2026-10-01 用池里两个真实账号实测：`checkin-activity-status` 返回
+  // `active:true today_checked_in:true streak_days:2 daily_credit:100
+  // total_credits:200`（连续 2 天、每日 100 积分）；`daily-checkin`
+  // 重放返回 `code 10001`「今天已签到，请明天再来」（与 src/credits.ts:57
+  // 的 CODE_ALREADY_CLAIMED 一致，余额不变）。
+  // 旧登记 false 是**缺陷**：该区域自 2026-09-30 起有「Buddy加油站」活动
+  // （season 10），用户实际损失了每日 100 积分的领取入口。
+  'workbuddy-cn': Object.freeze({ balance: true, dailyCheckin: true }),
   lobsterai: Object.freeze({ balance: true, dailyCheckin: true }),
   // Qoder：余额（`sash/api/v2/me/usage`）+ 每日领取
   // （`sash/api/v1/me/campaigns` → `POST …/{campaignId}/claim`，

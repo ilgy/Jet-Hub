@@ -40,10 +40,20 @@ export const DAILY_CHECKIN_PATH = '/v2/billing/meter/daily-checkin'
  * （copilot.tencent.com）与 WorkBuddy 国际版（www.workbuddy.ai）都实现该端点，
  * 请求头与响应结构完全一致，只有 baseURL 不同（随 `product.endpoint` 切换）。
  *
- * 这与签到能力形成对比 —— **签到**只有中国版有（国际版内核里连
- * `checkin-status` / `daily-checkin` 的字面量都不存在），但**积分余额查询
- * 两边都有**。两者是彼此独立的能力，不要因为"国际版没有签到"就推断
- * 它也查不到余额。
+ * ⚠️ 2026-10-01 修正：下面这段旧注释称「**签到**只有中国版有（国际版内核里连
+ * `checkin-status` / `daily-checkin` 的字面量都不存在）」—— **实测证伪**。
+ * 两个区域**都有**这两个端点（对照组探针：候选路径 401 vs 随机路径 404）。
+ * 真正的差异是**活动位**：国际版 `checkin-activity-status` 返回 `active:false`
+ * / `total_credits:0` / `start_time:""`，领取时 `code 10001` 的文案是
+ * 「签到活动未开启或已过期」；国内系（`buddy` / `buddy-intl` / `workbuddy-cn`）
+ * 则是有活动的（`workbuddy-cn` 实测 `active:true, streak_days:2,
+ * daily_credit:100, total_credits:200`）。
+ *
+ * **教训**：端点存在性要用「候选路径 vs 随机路径」的对照组测，不能靠
+ * 「内核里搜不到字面量」（那是打包器视角，端点由前端直接调用）。这也正是
+ * 能力矩阵曾把 `workbuddy-cn` 误登记为 `dailyCheckin:false` 的根因。
+ *
+ * 两者是彼此独立的能力，不要因为"国际版没有活动"就推断它也查不到余额。
  *
  * 该端点不在 CLI 内核里（内核只硬编码了 `get-dosage-notify` 用量通知），
  * 是 IDE 前端直接调用的，故静态搜索内核找不到，只能用真实凭据实测发现。
@@ -53,7 +63,17 @@ export const USER_RESOURCE_PATH = '/v2/billing/meter/get-user-resource'
 /** 签到请求超时（毫秒）。 */
 const REQUEST_TIMEOUT_MS = 30_000
 
-/** 服务端返回的 "今日已签到" 业务码（实测值）。 */
+/**
+ * 服务端返回的 "今日已签到" 业务码（实测值）。
+ *
+ * ⚠️ **该码在两区域语义不同**（2026-10-01 实测）：
+ * - 国内系（copilot.tencent.com）：`{"code":10001,"msg":"今天已签到，请明天再来"}`
+ * - 国际版（www.workbuddy.ai）：`{"code":10001,"msg":"签到活动未开启或已过期"}`
+ *
+ * `claimDailyCheckin` 把二者都归为 `already-claimed`（非致命），对**资金**没有
+ * 影响；但若将来给国际版开放按钮，需要按区域区分文案，否则会把「活动未开启」
+ * 显示成「今天已签到」。当前国际版登记 `dailyCheckin:false`，故不触发。
+ */
 const CODE_ALREADY_CLAIMED = 10001
 /** 静态分析列出的备选码表：1001=已领取 1002=无资格 1003=活动结束。 */
 const CODE_ALREADY_CLAIMED_ALT = 1001

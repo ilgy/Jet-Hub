@@ -52,6 +52,7 @@ import {
   type LobsteraiErrorKind,
 } from './lobsterai-errors.js'
 import { normalizeHarnessMessages } from './message-shape.js'
+import { httpErrorCode as classifyHttpError } from './http-error.js'
 import { createBlankReasoningSuppressor, createReasoningLoopDetector, hasUsableToolName, isReasoningLoopGuardEnabled, isTruncatedArguments, normalizeToolArguments, readWithIdleTimeout, resolveEmptyResponseReason, resolveToolPairing, splitThinkTaggedContent, stripCourseLeakFromHistoryContent, stripCourseLeakIfEnabled } from './sse.js'
 
 /** 本适配器注册的 provider 路由名（历史常量，等价于 `LOBSTERAI.id`）。 */
@@ -618,12 +619,12 @@ function buildLobsteraiFailure(input: LobsteraiFailureInput): LlmError {
   if (exhausted) {
     return new LlmError(
       `lobsterai: 模型 ${model} 所有账号均不可用（${detail}）`,
-      fromStream ? 'SERVER' : httpErrorCode(status),
+      fromStream ? 'SERVER' : httpErrorCode(status, text),
       { status },
     )
   }
 
-  return new LlmError(`lobsterai: ${detail}`, fromStream ? 'SERVER' : httpErrorCode(status), { status })
+  return new LlmError(`lobsterai: ${detail}`, fromStream ? 'SERVER' : httpErrorCode(status, text), { status })
 }
 
 /** 从错误体提取可读 detail 文本。 */
@@ -642,13 +643,22 @@ function errorDetail(body: string): string {
   return body
 }
 
-/** 将 HTTP 状态码映射为 harness 错误码。 */
-function httpErrorCode(status: number): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) return 'INVALID_REQUEST'
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
+/**
+ * 将 HTTP 状态码映射为 harness 错误码。
+ *
+ * ⚠️ **必须传报文**：原实现是 `httpErrorCode(status)`，把 400 一律归为
+ * `INVALID_REQUEST`，于是「提示词超出模型上下文窗口」这种情况在 LobsterAI 上
+ * 直接把裸错误抛给用户，而 DSH 的 `dsh-compaction-basic` 只对
+ * `failure.code === CONTEXT_WINDOW_EXCEEDED` 的失败自动压缩上下文重试 ——
+ * 长会话越过窗口即中断。
+ *
+ * 判定口径统一到 `src/http-error.ts`（中立层，**不是** openai-compat ——
+ * AGENTS.md 明令本适配器不得改用 openai-compat 的共享实现）。本文件保留自己的
+ * `errorDetail`（上方的窄口径：只认 code/message/msg，不含 error.type 与
+ * 嵌套 `error`），改动风险最小。
+ */
+function httpErrorCode(status: number, body?: string): string {
+  return classifyHttpError(status, body, { errorType: false, nestedError: false, errorCodeFields: false })
 }
 
 /**
@@ -686,7 +696,6 @@ function resolveChunkTimeoutMs(): number {
 /** LobsterAI 模型适配器。使用 Bearer access_token 鉴权，仅支持 SSE。 */
 export class LobsteraiAdapter extends LlmAdapter {
   private readonly product: LobsteraiProduct
-  private readonly fetchImpl: typeof fetch
   /** 动态模型缓存（首次 listModels 成功后填充）。 */
   private remoteModels: LobsteraiRemoteModel[] | undefined
   /** 远端下发的模型元数据（id → 条目），listModels/resolveModel 共用。 */
@@ -697,10 +706,21 @@ export class LobsteraiAdapter extends LlmAdapter {
   constructor(private readonly options: LobsteraiAdapterOptions) {
     super()
     this.product = options.product ?? LOBSTERAI
-    this.fetchImpl = options.fetchImpl ?? fetch
     this.fallbackIndex = new Map(
       (this.product.fallbackModels ?? []).map((model) => [model.id, model]),
     )
+  }
+
+  /**
+   * 注入的 fetch（测试用）；默认为全局 fetch。
+   *
+   * ⚠ 必须是 getter 而非构造期赋值：构造期求值会把 `globalThis.fetch` 冻结成
+   * 当时的引用，使运行时装上的 fetch 补丁（billion-context 上下文压缩代理即靠
+   * 此接管模型流量）对本适配器发出的请求失效 —— 表现为压缩静默不生效。
+   * 与 `src/buddy-auth.ts` 的既有写法保持一致。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.options.fetchImpl ?? fetch
   }
 
   /**

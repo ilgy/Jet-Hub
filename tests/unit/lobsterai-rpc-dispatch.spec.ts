@@ -80,22 +80,25 @@ async function callRefresh(
 ): Promise<{ calls: RefreshCall[]; value: { success: boolean; error?: string } }> {
   const calls: RefreshCall[] = []
   const { ctx, getHandler } = makeCtx(accounts)
-  // 参数顺序：ctx, pool, codearts, buddy, buddyIntl, workbuddy, workbuddyCn,
-  //           lobsterai, qoder, qoderCn, trae, traeIntl
-  registerJetHubRpc(
-    ctx as never,
-    makePool(accounts) as never,
-    makeServiceStub('codearts', calls) as never,
-    makeServiceStub('buddy', calls) as never,
-    makeServiceStub('buddy-intl', calls) as never,
-    makeServiceStub('workbuddy', calls) as never,
-    makeServiceStub('workbuddy-cn', calls) as never,
-    makeServiceStub('lobsterai', calls) as never,
-    makeServiceStub('qoder', calls) as never,
-    makeServiceStub('qoder-cn', calls) as never,
-    makeServiceStub('trae', calls) as never,
-    makeServiceStub('trae-intl', calls) as never,
-  )
+  // ⚠️ P1-⑤ 起 `registerJetHubRpc` 收**具名对象**：服务由字段名指定，
+  // 不再是「第 N 个位置实参」——少接 / 接错字段是**编译错误**。
+  // 替身仍用 provider id 命名，从而能用「刷的是同名服务」反向验证分派。
+  registerJetHubRpc(ctx as never, {
+    pool: makePool(accounts) as never,
+    codearts: makeServiceStub('codearts', calls) as never,
+    buddy: makeServiceStub('buddy', calls) as never,
+    buddyIntl: makeServiceStub('buddy-intl', calls) as never,
+    workbuddy: makeServiceStub('workbuddy', calls) as never,
+    workbuddyCn: makeServiceStub('workbuddy-cn', calls) as never,
+    lobsterai: makeServiceStub('lobsterai', calls) as never,
+    qoder: makeServiceStub('qoder', calls) as never,
+    qoderCn: makeServiceStub('qoder-cn', calls) as never,
+    trae: makeServiceStub('trae', calls) as never,
+    traeIntl: makeServiceStub('trae-intl', calls) as never,
+    cline: makeServiceStub('cline', calls) as never,
+    loomy: makeServiceStub('loomy', calls) as never,
+    raccoon: makeServiceStub('raccoon', calls) as never,
+  })
   const response = await getHandler()(new Request('http://127.0.0.1/api/jet-hub', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

@@ -75,12 +75,25 @@ function parseCredential(value: string): CodeArtsCredential | undefined {
 export class CodeArtsAuth extends Service {
   /** 登录会话是否仍处于活跃状态；stop() 置 false，防止在途刷新回写已登出凭据。 */
   private active = true
-  /** 用于测试的可注入 fetch；默认为全局 fetch。 */
-  private fetchImpl: typeof fetch = fetch
+  /** 调用方注入的 fetch；未注入时解析全局 `fetch`。 */
+  private readonly injectedFetch?: typeof fetch
+
+  /**
+   * 用于测试/代理的可注入 fetch，**每次访问都重新解析全局 `fetch`**。
+   *
+   * ⚠️ 不能在构造期写成 `private fetchImpl = fetch`：那样会把当时的引用冻结下来，
+   * 运行时装在 `globalThis.fetch` 上的补丁（上下文压缩代理、请求追踪）就再也看不到
+   * 本服务发出的请求 —— 症状是「代理对 CodeArts 的续期与目录拉取完全静默」。
+   * 八个适配器已统一为同样的惰性 getter（见
+   * `tests/unit/lazy-fetch-resolution.spec.ts`），本服务此前是唯一漏网的。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.injectedFetch ?? fetch
+  }
 
   constructor(ctx: Context, options: { fetcher?: typeof fetch } = {}) {
     super(ctx, 'codeartsAuth')
-    if (options.fetcher) this.fetchImpl = options.fetcher
+    this.injectedFetch = options.fetcher
   }
 
   /** 运行登录流程（默认新式 OAuth；flow: 'ticket' 走旧流程回退）并持久化凭据。 */

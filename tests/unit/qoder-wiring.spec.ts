@@ -6,6 +6,23 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (p: string): string => readFileSync(resolve(here, p), 'utf8')
 
+/**
+ * ⚠️ P1-⑤ 结构重构：`handleMethod` 的各分支按领域拆到 `src/rpc/*.ts`，
+ * 门面只剩公共助手与薄分发器。源码级守卫因此读「门面 + 领域模块」的合并文本。
+ *
+ * 顺序有讲究：`case 'credits.balances'`（credits.ts）必须在
+ * `case 'model.list'`（models.ts）之前，否则跨文件切片断言会取到空串。
+ */
+const RPC_SOURCE_FILES = [
+  '../../src/jet-hub-rpc.ts',
+  '../../src/rpc/account.ts',
+  '../../src/rpc/login.ts',
+  '../../src/rpc/onboarding.ts',
+  '../../src/rpc/credits.ts',
+  '../../src/rpc/models.ts',
+  '../../src/rpc/backup.ts',
+] as const
+
 /** 剔除注释行，避免注释里叙述缺陷的文字造成假阳性/假阴性。 */
 function codeOnly(source: string): string {
   return source
@@ -42,8 +59,9 @@ describe('Qoder 宿主侧接线（src/index.ts）', () => {
     //
     // ⚠️ 两个区域实例（qoder / qoderCn）都必须传：国内版与国际版端点、
     // 登录态、账号池各自独立，漏传会让国内版面板完全没有后端。
+    // P1-⑤ 起形参是**具名对象**，故锁的是 `qoder` / `qoderCn` 两个**字段名**。
     expect(index).toMatch(
-      /registerJetHubRpc\(\s*ctx,\s*pool,\s*service,[\s\S]*?qoder,\s*qoderCn,[\s\S]*?modelAdapters,?\s*\)/,
+      /registerJetHubRpc\(ctx, \{[\s\S]*?\n\s*qoder,\r?\n\s*qoderCn,[\s\S]*?modelAdapters,/,
     )
     expect(index, 'qoder 适配器须登记进映射').toContain('qoder: qoderAdapter')
     expect(index, 'qoder-cn 适配器须登记进映射').toContain("'qoder-cn': qoderCnAdapter")
@@ -63,8 +81,9 @@ describe('Qoder 宿主侧接线（src/index.ts）', () => {
   })
 })
 
-describe('Qoder Jet Hub RPC 分支（src/jet-hub-rpc.ts）', () => {
-  const rpc = read('../../src/jet-hub-rpc.ts')
+describe('Qoder Jet Hub RPC 分支（src/rpc/*.ts，经 src/jet-hub-rpc.ts 门面暴露）', () => {
+  // ⚠️ P1-⑤：分支按领域拆到 src/rpc/*.ts，故读「门面 + 领域模块」的合并文本。
+  const rpc = RPC_SOURCE_FILES.map((rel) => read(rel)).join('\n')
 
   it('registerJetHubRpc 接受 qoder 形参', () => {
     expect(rpc).toContain('qoder: QoderAuth')

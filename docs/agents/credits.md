@@ -4,7 +4,7 @@
 > 主文件只留「规则 + 索引」；改动相关代码前请先读本分册——**规则本身在主文件里是完整的，
 > 本分册补充的是「为什么」与「怎么排查」**。
 
-五个 provider 的签到协议差异、幂等判据、能力矩阵门控。改动 src/*-credits.ts 或 credits-capabilities.js 前必读。
+九个协议族的签到/任务领取差异、幂等判据、能力矩阵门控。改动 src/*-credits.ts 或 credits-capabilities.js 前必读。
 
 ---
 ## 积分领取（每日签到）
@@ -39,7 +39,7 @@ const claim = deps.claim ?? (claimDailyCheckin as unknown as NonNullable<…>)
 ⚠️ 只有 **buddy / workbuddy** 走这条默认路径（其余三个 provider 都在自己的分支里
 显式注入 `claim`），所以故障面恰好是 CodeBuddy 系。
 
-**五套协议完全不同**的实现，各自独立：
+**七套协议完全不同**的实现，各自独立：
 
 **Qoder** —— `src/qoder-credits.ts`（2026-09-21 由 keylog 解密抓包解出）：
 
@@ -50,12 +50,23 @@ const claim = deps.claim ?? (claimDailyCheckin as unknown as NonNullable<…>)
 - 只领 `actionType === 'CLAIM_BENEFIT' && claimStatus === 'CLAIMABLE'`
 - 活动每日 10:00（UTC+8）刷新，领取后 30 天有效
 
-**CodeBuddy** —— `src/credits.ts`（国际版 WorkBuddy 后端无签到接口）：
+**CodeBuddy 系（buddy / buddy-intl / workbuddy / workbuddy-cn）** —— `src/credits.ts`：
 
 - 状态查询：`POST /v2/billing/meter/checkin-activity-status`（**不是** `checkin-status`，后者返回全空占位数据）
 - 领取：`POST /v2/billing/meter/daily-checkin`
-- 幂等：重复领取返回 HTTP 400 + `code:10001`（「今天已签到」），判定**以响应体 code 为准**，不能只看 HTTP 状态
+- 幂等：重复领取返回 HTTP 400 + `code:10001`，判定**以响应体 code 为准**，不能只看 HTTP 状态
 - **不需要** `X-Device-Token`（图灵盾）：实测服务端未强制校验，故不引入 native SDK 依赖
+- ⚠️ **`code:10001` 在两区域语义不同**（2026-10-01 实测）：国内系是
+  「今天已签到，请明天再来」，国际版是「签到活动未开启或已过期」。两者都被
+  `claimDailyCheckin` 归为 `already-claimed`（非致命，不影响资金），但若给
+  国际版开放按钮需按区域区分文案。
+- ⚠️ **端点存在性 ≠ 活动存在性**（本次修正的核心教训）：四个区域**都有**这两个
+  端点（对照组探针：候选路径 401 vs 随机 404 路径），差异只在**活动位**：
+  - `buddy` / `buddy-intl` / `workbuddy-cn` → `active:true`，有活动
+  - `workbuddy`（国际版）→ `active:false` / `total_credits:0` / `start_time:""`，无活动
+  旧文档称「国际版内核里连 `checkin-status` / `daily-checkin` 字面量都没有 ⇒ 无接口」
+  ——**已证伪**：内核字面量是打包器视角，这两个端点由 IDE 前端直接调用。
+  该错误结论曾导致 `workbuddy-cn` 被连带误登记为 `dailyCheckin:false`（见下表）。
 
 **LobsterAI** —— `src/lobsterai-credits.ts`（三步，见 `lobsterai2api/sigin.py`）：
 
@@ -94,15 +105,27 @@ const claim = deps.claim ?? (claimDailyCheckin as unknown as NonNullable<…>)
 - 幂等：重复领取返回非零业务码（实测 `9074` 为「签到人数过多」），判定以响应体 `code` 为准
 - 失败时经 `classifyTraeCheckinError` 带上 `errorType` / `cooldownSecs`（见上小节的分类表）
 
-四套都遵守的共同约定：
+**Loomy** —— `src/loomy-credits.ts`（讯飞；签到只触发每日额度，**没有**「已领」业务码）：
+
+- 一键签到 `POST /api/v1/points/first-login`（body `{}`），登录成功后官方客户端也会立刻调它
+- 余额/详情 `fetchLoomyCreditBalance` / `fetchLoomyCreditDetail`（**未签到时「今日额度」字段缺省，不要硬编码 5000**，额度随活动变）
+- 适配器侧入口 `LoomyAuth.claimDailyQuota(credential)`（`src/loomy-auth.ts:461`，用户要的「一键签到」）；`LoomyAuth` 的登录流程里也会主动调 `claimLoomyDailyQuota`（`src/loomy-auth.ts:206` 与 `:244`），与官方客户端行为一致
+
+**Raccoon** —— `src/raccoon-credits.ts`（商汤小浣熊；AES-128 加密请求）：
+
+- 签到 `claimRaccoonLoginReward`（**写端点**，探针只断言其存在、不调用）
+- 余额 `fetchRaccoonCreditBalance`、新手任务 `fetchRaccoonOnboardingStatus`
+- ⚠️ 手机号等字段要过 AES-128 加密，密钥 `RACCOON_PHONE_CIPHER_SECRET`（`src/raccoon.ts:43`，值 `senseraccoon2023`，来自渲染层公开 JS）属**公共逆向协议常量**，脱敏时**不得改动**（改了生产直接瘫痪）
+
+七套都遵守的共同约定：
 
 - `credits.claimAll` / `credits.status` **处理该 provider 下的全部账号，含已停用**：停用只影响账号池的自动选择与限流切换，与「该账号今天领了没」无关
 - 逐账号**顺序执行**（并发易触发风控），单个账号失败不中断整批
 - 返回同一个 `ClaimOutcome` 判别联合，使 `computeClaimSummary` 与前端摘要 UI 两套协议共用
 
-**积分余额（Credits Balance）** 也是**四套端点**，但语义一致（「查不到」与「余额为 0」严格区分）：
+**积分余额（Credits Balance）** 是**每族一套端点**（下表只详列四族代表性的，其余见各 provider 分册），但语义一致（「查不到」与「余额为 0」严格区分）：
 
-**CodeBuddy 系（buddy / workbuddy）** —— `POST /v2/billing/meter/get-user-resource`：
+**CodeBuddy 系（buddy / buddy-intl / workbuddy / workbuddy-cn）** —— `POST /v2/billing/meter/get-user-resource`：
 
 - body `{}`；响应**双层嵌套**：`data.Response.Data.Accounts[]`（签到是单层 `data`，此处最易解析错）
 - 总额用各包 `CapacityRemainPrecise` 相加（实测 247.87+100=347.87），**不用**截断过的 `TotalDosage`（347）
@@ -125,7 +148,7 @@ const claim = deps.claim ?? (claimDailyCheckin as unknown as NonNullable<…>)
 - 余额 = `∑(credits_limit - credits_amount)`；`credits_limit <= 0` 的条目跳过（与 Go 端 `EntUsage` 同口径）
 - ⚠️ **必须带 `require_usage: true`**：不带时上游不返回 `usage` 明细，`credits_amount` 恒缺省为 0，余额会等于额度总额（虚高）。头同样走 `traeCheckinHeaders`
 
-四者共同的约定：
+上述各族共同的约定：
 
 - 累加后 `roundCredits` 规整两位小数（多包浮点噪声会放大成 655.67000031）
 - 失败时 `balance` 为 `null` + `error`，卡片显示原因而非 0
@@ -142,10 +165,19 @@ const claim = deps.claim ?? (claimDailyCheckin as unknown as NonNullable<…>)
 |---|---|---|
 | `codearts` | ✓ | ✓（华为云签名四步流程） |
 | `buddy` | ✓ | ✓ |
-| `workbuddy` | ✓ | ✗（国际版后端无签到接口） |
+| `buddy-intl` | ✓ | ✓ |
+| `workbuddy` | ✓ | ✗（端点存在，但**该区域活动位不下发**：`active:false`、`code 10001`「签到活动未开启或已过期」） |
+| `workbuddy-cn` | ✓ | ✓（2026-10-01 修正：曾误登记为 ✗。实测 `active:true, streak_days:2, daily_credit:100, total_credits:200`，「Buddy加油站」season 10。同路径同请求头，仅端点区域不同，与 `buddy`/`buddy-intl` 同型） |
 | `lobsterai` | ✓ | ✓（`client-activities` 三步流程） |
 | `qoder` | ✓（`sash/api/v2/me/usage`，只需 Bearer） | ✓（`sash/api/v1/me/campaigns` → `POST …/{campaignId}/claim`） |
+| `qoder-cn` | ✓ | ✓ |
 | `trae` | ✓ | ✓（`checkin_credits` 两步流程） |
+| `trae-intl` | ✓ | ✓ |
+| `cline` | ✓（`/api/v1/users/{id}/balance`） | ✗（后端无签到接口） |
+| `loomy` | ✓ | ✓（`POST /api/v1/points/first-login`，幂等无「已领」业务码） |
+| `raccoon` | ✓ | ✗（积分入口是**一次性登录奖励 / 新手任务**，不是每日签到） |
+
+> 表中每行是一个**协议族**的取值（区域变体 `buddy-intl` / `workbuddy-cn` / `qoder-cn` / `trae-intl` 与 `cline` / `loomy` / `raccoon` 都已在上表列出）——**真正的真相源是 `plugin-src/client/credits-capabilities.js`，本表只是导览**；新增 provider 必须在那个文件里逐项登记，`tests/unit/credits-capabilities.spec.ts` 有断言锁死它与面板 `PROVIDERS` 集合相等。
 
 > ⚠️ `qoder` **必须显式登记**，不能省略：上面那条「能力矩阵与 `PROVIDERS` 条目集合相等」的断言要求两者同步，而 qoder 必然要进 `PROVIDERS`（否则面板不渲染）。
 >

@@ -19,6 +19,11 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { settingsNamespaceFor } from './settings-compat.js'
+import {
+  errorMessageText,
+  httpErrorCode as classifyHttpError,
+  errorDetail as sharedErrorDetail,
+} from './http-error.js'
 import { isRateLimited, parseRateLimitError } from './llm-adapter.js'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -373,29 +378,28 @@ function serializeMessages(
 
 /** 安全读取 Error.message。 */
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  try { return String(error) } catch { return 'unknown error' }
+  return errorMessageText(error)
 }
 
-/** 从错误体提取可读 detail 文本。 */
+/**
+ * 从错误体提取可读 detail 文本（**窄口径**，见 {@link BUDDY_DETAIL_OPTIONS}）。
+ */
 function errorDetail(body: string): string {
-  try {
-    const data = JSON.parse(body) as Record<string, unknown>
-    const error = typeof data.error === 'object' && data.error !== null
-      ? data.error as Record<string, unknown>
-      : undefined
-    const parts = [
-      typeof error?.code === 'string' ? error.code : undefined,
-      typeof error?.type === 'string' ? error.type : undefined,
-      typeof error?.message === 'string' ? error.message : undefined,
-      typeof data.message === 'string' ? data.message : undefined,
-    ].filter((value): value is string => value !== undefined)
-    if (parts.length > 0) return parts.join(' ')
-  } catch {
-    // 非 JSON 错误体
-  }
-  return body
+  return sharedErrorDetail(body, BUDDY_DETAIL_OPTIONS)
 }
+
+/**
+ * Buddy 系产品的 detail 口径选项：只认嵌套 `error.code/type/message` 与顶层
+ * `message`，**不**认 `data.code` 的 `code=` 前缀、`msg`、`error_code/error_msg`
+ * 与裸字符串 `error` —— 与迁移前的本地实现逐字一致。
+ */
+const BUDDY_DETAIL_OPTIONS = {
+  codeLabel: false,
+  errorType: true,
+  nestedError: false,
+  errorCodeFields: false,
+  msgField: false,
+} as const
 
 /**
  * 将 HTTP 状态码映射为 harness 错误码。
@@ -406,33 +410,23 @@ function errorDetail(body: string): string {
  * `failure.code === CONTEXT_WINDOW_EXCEEDED` 的失败压缩上下文并重试）；
  * 若一律标成 INVALID_REQUEST，长会话一旦越过窗口就会直接把裸错误抛给用户。
  *
- * 实测报文（国际版 WorkBuddy，deepseek-v4.1-flash）：
+ * ⚠️ **判定必须看完整报文**（`contextProbe: 'both'`，即原始 body 与归一化
+ * detail 都检）：实测报文（国际版 WorkBuddy，deepseek-v4.1-flash）
  * ```
  * {"code":11115,"msg":"prompt is too long: 1061554 tokens > 1048576 maximum",
  *  "extError":{"code":"context_length_exceeded","type":"invalid_request_error",...},
  *  "displayMsg":{"en":"The request exceeds the model context limit. ..."}}
  * ```
- * 注意该报文的 `msg` 是「prompt is too long」措辞、`extError.code` 是
- * `context_length_exceeded`，两者都能被 `isContextWindowExceededError` 识别。
+ * 的 `extError.code = context_length_exceeded` 只存在于原始 body —— `errorDetail`
+ * 归一化后会丢掉该字段（其正则要求出现 context/for-the-model 字样），只看 detail
+ * 会漏判。判定看完整报文、展示用归一化文本，两者职责不同。
  *
- * 与 CodeArts 适配器（llm-adapter.ts 的 httpErrorCode）同一判定口径，但
- * **传入原始 body 而非 errorDetail(body)**：`errorDetail` 在能提取到
- * `error.*` / `message` 时会返回拼接后的短文本，从而丢掉 `extError`、
- * `displayMsg` 等字段——实测「仅 msg 文本」这种输入会被
- * `isContextWindowExceededError` 漏判（其正则要求出现 context/for-the-model
- * 字样），而完整 body 因含 `extError.code = context_length_exceeded` 能稳定命中。
- * 判定看完整报文、展示用归一化文本，两者职责不同。
+ * 判定实现统一在 `src/http-error.ts`（中立层，**不是** openai-compat ——
+ * AGENTS.md 明令本适配器不得改用 openai-compat 的共享实现）。本文件只保留
+ * 产品差异选项与调用形态。
  */
 function httpErrorCode(status: number, body: string): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) {
-    // 先判上下文超限，再退回通用 INVALID_REQUEST。
-    if (isContextWindowExceededError(body)) return CONTEXT_WINDOW_EXCEEDED_CODE
-    return 'INVALID_REQUEST'
-  }
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
+  return classifyHttpError(status, body, BUDDY_DETAIL_OPTIONS)
 }
 
 /**
@@ -547,7 +541,6 @@ function collectImages(content: readonly unknown[], refs: Map<string, unknown>):
 export class BuddyAdapter extends LlmAdapter {
   /** 本适配器所属的产品配置（默认 CodeBuddy）。 */
   private readonly product: BuddyProduct
-  private readonly fetchImpl: typeof fetch
   /**
    * 前缀缓存会话标识（prompt_cache_key）。同一会话内所有请求复用同一 key，
    * 服务端据此把相同前缀的 KV 缓存跨请求复用；缺失时缓存命中恒为 0。
@@ -571,7 +564,6 @@ export class BuddyAdapter extends LlmAdapter {
     super()
     // 默认 CodeBuddy，保证既有行为完全不变。
     this.product = options.product ?? CODEBUDDY
-    this.fetchImpl = options.fetchImpl ?? fetch
     this.sessionId = options.sessionId ?? crypto.randomUUID().replace(/-/g, '')
     const fallback = this.product.fallbackModels ?? []
     this.productFallbackIndex = new Map(fallback.map((model) => [model.id, model]))
@@ -587,6 +579,18 @@ export class BuddyAdapter extends LlmAdapter {
         this.remoteContextWindows = new Map()
       })
     }
+  }
+
+  /**
+   * 注入的 fetch（测试用）；默认为全局 fetch。
+   *
+   * ⚠ 必须是 getter 而非构造期赋值：构造期求值会把 `globalThis.fetch` 冻结成
+   * 当时的引用，使运行时装上的 fetch 补丁（billion-context 上下文压缩代理即靠
+   * 此接管模型流量）对本适配器发出的请求失效 —— 表现为压缩静默不生效。
+   * 与 `src/buddy-auth.ts` 的既有写法保持一致。
+   */
+  private get fetchImpl(): typeof fetch {
+    return this.options.fetchImpl ?? fetch
   }
 
   /**

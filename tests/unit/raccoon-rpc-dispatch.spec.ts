@@ -4,15 +4,33 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const rpcSource = readFileSync(resolve(here, '../../src/jet-hub-rpc.ts'), 'utf8')
+
+/**
+ * ⚠️ P1-⑤ 结构重构：`handleMethod` 的各个分支按领域拆到了 `src/rpc/*.ts`，
+ * 门面只剩公共助手与薄分发器。本文件的下标锚点（`case 'onboarding.claim'`、
+ * `provider === RACCOON.id` 等）如今落在不同模块里，故读「门面 + 领域模块」的
+ * **合并文本**；顺序尽量保持重构前单文件内的相对顺序（credits 排在 models 之前，
+ * 否则跨文件切片断言会取到空串）。
+ */
+const RPC_SOURCE_FILES = [
+  '../../src/jet-hub-rpc.ts',
+  '../../src/rpc/account.ts',
+  '../../src/rpc/login.ts',
+  '../../src/rpc/onboarding.ts',
+  '../../src/rpc/credits.ts',
+  '../../src/rpc/models.ts',
+  '../../src/rpc/backup.ts',
+] as const
+
+const rpcSource = RPC_SOURCE_FILES.map((rel) => readFileSync(resolve(here, rel), 'utf8')).join('\n')
 
 /**
  * Raccoon 的 RPC 分派（源码级回归）。
  *
- * ⚠️ 为什么用源码扫描而不是实例化端点：`registerJetHubRpc` 的参数是**位置参数**
- * （12 个），在测试里逐个填替身既脆弱又与既有 `jet-hub-rpc.spec.ts` 的桩重复。
- * 本文件锁的是**语义约定**（哪个分支返回什么形状），那些约定一旦写错，
- * 表现为「UI 显示矛盾的数字」这类**单测容易漏掉**的问题。
+ * ⚠️ 为什么用源码扫描而不是实例化端点：`registerJetHubRpc` 现在收**具名对象**
+ * （P1-⑤ 之前是 18 个位置参数），在测试里逐个填替身既脆弱又与既有
+ * `jet-hub-rpc.spec.ts` 的桩重复。本文件锁的是**语义约定**（哪个分支返回什么形状），
+ * 那些约定一旦写错，表现为「UI 显示矛盾的数字」这类**单测容易漏掉**的问题。
  *
  * 更深的行为验证在 `tests/unit/jet-hub-rpc.spec.ts`（复用它的端点桩）。
  */

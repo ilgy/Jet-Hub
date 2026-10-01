@@ -16,13 +16,13 @@
 > ⚠️ **规则本身在本文件里是完整的**。分册补充的是「为什么这么定」与「出错时怎么查」。
 > 出现异常现象、或要推翻某条规则时，**必须**先读分册，别重复已记录过的排查路径。
 
-| 分册 | 覆盖内容 | 何时必读 |
-|---|---|---|
-| [`docs/agents/trae.md`](docs/agents/trae.md) | TRAE 四条协议的坑、通道路由、推理档位、Max 模式、图片判定 | 改 `src/trae*.ts` |
-| [`docs/agents/pricing.md`](docs/agents/pricing.md) | 计费倍率解析差异、`maxOutputTokens` 下发、同名消歧、X-Domain | 改展示名 / 请求头 / 输出上限 |
-| [`docs/agents/credits.md`](docs/agents/credits.md) | 五个 provider 的签到协议、幂等判据、能力矩阵门控 | 改 `src/*-credits.ts` / `credits-capabilities.js` |
-| [`docs/agents/catalog-gating.md`](docs/agents/catalog-gating.md) | 模型黑名单、账号门控、`listAllModels` 契约、两步式登录 | 改 `listModels` / `model.list` RPC |
-| [`docs/agents/qoder.md`](docs/agents/qoder.md) | Qoder 积分端点实测、幂等判据、`openai-compat.ts` 边界 | 改 `src/qoder*.ts` / `openai-compat.ts` |
+  分册   覆盖内容   何时必读  
+ --- --- --- 
+  [`docs/agents/trae.md`](docs/agents/trae.md)   TRAE 四条协议的坑、通道路由、推理档位、Max 模式、图片判定   改 `src/trae*.ts`  
+  [`docs/agents/pricing.md`](docs/agents/pricing.md)   计费倍率解析差异、`maxOutputTokens` 下发、同名消歧、X-Domain   改展示名 / 请求头 / 输出上限  
+  [`docs/agents/credits.md`](docs/agents/credits.md)   各 provider 的签到协议、幂等判据、能力矩阵门控   改 `src/*-credits.ts` / `credits-capabilities.js`  
+  [`docs/agents/catalog-gating.md`](docs/agents/catalog-gating.md)   模型黑名单、账号门控、`listAllModels` 契约、两步式登录   改 `listModels` / `model.list` RPC  
+  [`docs/agents/qoder.md`](docs/agents/qoder.md)   Qoder 积分端点实测、幂等判据、`openai-compat.ts` 边界   改 `src/qoder*.ts` / `openai-compat.ts`  
 
 ---
 
@@ -30,16 +30,16 @@
 
 本项目是 DeepSeek Harness 的一个插件（`dsh-codearts-auth`），提供华为云 CodeArts 浏览器登录与凭据管理功能。插件演进涵盖了七个 LLM provider 路由核心骨架及其区域版本，全量支持 **13 个 provider**，分属 7 套互不相同的协议族：
 
-| 协议族 | provider | 特点 |
-|---|---|---|
-| 腾讯 CodeBuddy 系 | `buddy` / `buddy-intl` / `workbuddy-cn` / `workbuddy` | 同一 CLI 内核与认证协议，差异**全在 `endpoint`** |
-| 有道 LobsterAI | `lobsterai` | 本地回调 + authCode 换 token |
-| 阿里 Qoder | `qoder` / `qoder-cn` | PKCE 设备码轮询 + **加密推理端点**（WASM 签名） |
-| 字节 TRAE | `trae` / `trae-intl` | ExchangeToken 轮换 + 载荷双向转换（OpenAI ↔ SOLO） |
-| 华为 CodeArts | `codearts` | `SDK-HMAC-SHA256` 签名 |
-| Cline | `cline` | WorkOS 设备码轮询 + 免费模型识别 + 5 档思考强度 |
-| 讯飞 Loomy | `loomy` | 微信扫码 + 手机号/短信登录 + 智能余额选号 |
-| 商汤小浣熊 | `raccoon` | 二维码扫码/手机验证码 + AES-128 加密 + 积分签到 |
+  协议族   provider   特点  
+ --- --- --- 
+  腾讯 CodeBuddy 系   `buddy` / `buddy-intl` / `workbuddy-cn` / `workbuddy`   同一 CLI 内核与认证协议，差异**全在 `endpoint`**  
+  有道 LobsterAI   `lobsterai`   本地回调 + authCode 换 token  
+  阿里 Qoder   `qoder` / `qoder-cn`   PKCE 设备码轮询 + **加密推理端点**（WASM 签名）  
+  字节 TRAE   `trae` / `trae-intl`   ExchangeToken 轮换 + 载荷双向转换（OpenAI ↔ SOLO）  
+  华为 CodeArts   `codearts`   `SDK-HMAC-SHA256` 签名  
+  Cline   `cline`   WorkOS 设备码轮询 + 免费模型识别 + 5 档思考强度  
+  讯飞 Loomy   `loomy`   微信扫码 + 手机号/短信登录 + 智能余额选号  
+  商汤小浣熊   `raccoon`   二维码扫码/手机验证码 + AES-128 加密 + 积分签到  
 
 ⚠️ **区域版各占一个 provider**：CodeBuddy `buddy`(国内)/`buddy-intl`(国际)、
 WorkBuddy `workbuddy-cn`(国内)/`workbuddy`(国际)、Qoder `qoder`(国际)/`qoder-cn`(国内)、
@@ -60,9 +60,15 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   ⚠️ 改 `qoder-wasm.ts` 前先读**不入库**的 `docs/qoder-encryption-notes.md`。
 - **TRAE**：独立一套 `src/trae*.ts`，**请求体与响应都要转换**。详见
   [trae 分册](docs/agents/trae.md)。
-- **`src/openai-compat.ts` 只服务 qoder**。`buddy-adapter.ts` /
-  `lobsterai-adapter.ts` **刻意不改用它** —— 那两份已被大量单测与线上流量验证，
-  重构属无关高风险改动。
+- **`src/openai-compat.ts` 现在服务于 `qoder` / `cline` / `loomy` / `raccoon`**
+  （共用 SSE 解析、消息序列化、`collectImages` 等 OpenAI 兼容件）。
+  `buddy-adapter.ts` / `lobsterai-adapter.ts` **刻意不改用它** —— 那两份已被大量单测
+  与线上流量验证，重构属无关高风险改动。
+- **错误归一化统一在 `src/http-error.ts`**（`errorDetail` / `httpErrorCode` /
+  `errorMessageText` / `isContextOverflow`），各 adapter 只保留**产品差异包装**
+  （`BUDDY_DETAIL_OPTIONS`、`CODEARTS_DETAIL_OPTIONS`、`quota` 开关等）。
+  ⚠️ `400` 必须先过 `isContextOverflow` 再回退 `INVALID_REQUEST`，
+  且判据要看**完整远端报文**（只看 `errorDetail` 会丢掉 `extError`/`displayMsg` 而漏判）。
 
 - **包名**：`dsh-codearts-auth`
 - **入口**：`lib/index.js`（宿主侧）、`lib/client/jet-hub.js`（客户端 bundle）
@@ -71,7 +77,7 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 ## 技术栈与约束
 
-- **Node.js**：`^22.19.0 || >=24.0.0`
+- **Node.js**：`^22.19.0    >=24.0.0`
 - **构建系统**：宿主侧 `tsc` → `lib/`；客户端 `esbuild`
   （`plugin-src/client/build.mjs`）→ `lib/client/jet-hub.js`；
   `scripts/copy-assets.mjs` 复制 `.wasm`（**`tsc` 不搬非 TS 资源**）。
@@ -85,15 +91,15 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 ## 项目结构
 
-| 路径 | 说明 |
-|-------|------|
-| `src/` | TypeScript 源码目录（宿主侧） |
-| `plugin-src/client/` | Jet Hub 客户端源码（esbuild 打包） |
-| `lib/` | 编译产物（已 gitignore） |
-| `tests/unit/` | 单元测试 |
-| `docs/agents/` | **AGENTS.md 分册**（见上方索引） |
-| `cordis.patch.yml` | DSH bundle 补丁 |
-| `scripts/` | 构建辅助、只读探针脚本 |
+  路径   说明  
+ ------- ------ 
+  `src/`   TypeScript 源码目录（宿主侧）  
+  `plugin-src/client/`   Jet Hub 客户端源码（esbuild 打包）  
+  `lib/`   编译产物（已 gitignore）  
+  `tests/unit/`   单元测试  
+  `docs/agents/`   **AGENTS.md 分册**（见上方索引）  
+  `cordis.patch.yml`   DSH bundle 补丁  
+  `scripts/`   构建辅助、只读探针脚本  
 
 ## DSH 插件契约
 
@@ -146,11 +152,11 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 **真实缺陷**：合并时把服务端产品从 4 个收敛成 2 个，**但客户端列表没同步收敛**。
 `buddy-intl` 与 `workbuddy-cn` 成空壳，三处后果：
 
-| 后果 | 表现 |
-|---|---|
-| 账号成**孤儿** | 账号池里的 `workbuddy-cn` 能看见，但**无法续期、无法删除** |
-| 设置页**崩溃** | namespace 未注册 → `refFor → deriveKeyRef(provider)` 抛 `provider.toUpperCase is not a function` |
-| 「刷新」**报错** | `account.refresh` 的 switch 缺这两条 → 落 `default` 抛 `Unknown provider` |
+  后果   表现  
+ --- --- 
+  账号成**孤儿**   账号池里的 `workbuddy-cn` 能看见，但**无法续期、无法删除**  
+  设置页**崩溃**   namespace 未注册 → `refFor → deriveKeyRef(provider)` 抛 `provider.toUpperCase is not a function`  
+  「刷新」**报错**   `account.refresh` 的 switch 缺这两条 → 落 `default` 抛 `Unknown provider`  
 
 **新增/删除 provider 的完整清单**（漏一处就出上面三类问题）：
 
@@ -159,9 +165,9 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 3. `src/index.ts` — `registerProviderSettings(...)` 里加 **`llm-${product.id}`**
 4. `src/index.ts` — `refreshAllCredentials()` 与**两个** `ctx.effect` 清理块
 5. `src/index.ts` — `modelAdapters` 映射（「显示列表」要用 `listAllModels()`）
-6. `src/index.ts` — `registerJetHubRpc(...)` 实参
-7. `src/jet-hub-rpc.ts` — 区域族分派 Map（`buddyServices` / `qoderServices` / `traeServices`）
-8. `src/jet-hub-rpc.ts` — `account.refresh` 的 switch 分支（**最容易漏**）
+6. `src/index.ts` — `registerJetHubRpc(ctx, { ... })` 的**具名对象字段**（P1-⑤ 起不再是位置实参）
+7. `src/jet-hub-rpc.ts` — `JetHubRpcServices` 接口加字段；区域族分派 Map 在 `src/rpc/contracts.ts` 的 `JetHubRegionRouting`（`buddyAuthForProduct` / `qoderAuthForProduct` / `traeAuthForProduct`）
+8. `src/rpc/account.ts` — `account.refresh` 的 switch 分支（**最容易漏**）
 9. `plugin-src/client/jet-hub.js` — `PROVIDERS` 面板项
 10. `plugin-src/client/credits-capabilities.js` — 能力表（**必须与 PROVIDERS 等集**）
 
@@ -236,13 +242,13 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 - `name` **纯属展示**，DSH 的选择与持久化只用 `id`，故附加价格不会污染会话历史。
 - 四个 provider 的倍率字段**形态互不相同**，绝不可共用解析：
 
-| provider | 字段 | 真实形态 |
-|---|---|---|
-| `buddy` / `workbuddy*` | `data.models[].credits` | **字符串 `"x0.29"`**（x 在前） |
-| 同上 | `modelPromotions[].discount.discountedCredits` | **字符串 `"0.50x"`（x 在后！）** |
-| `lobsterai` | `data[].costMultiplier` | **裸数字** `0.05` |
-| `qoder` | 目录 `chat[].price_factor` | **裸数字**，`0` = 免费 |
-| `trae` | `display_contact_config.consumption_rate.data.rate` | **裸数字**；该字段本身是 **JSON 字符串，须二次 `JSON.parse`** |
+  provider   字段   真实形态  
+ --- --- --- 
+  `buddy` / `workbuddy*`   `data.models[].credits`   **字符串 `"x0.29"`**（x 在前）  
+  同上   `modelPromotions[].discount.discountedCredits`   **字符串 `"0.50x"`（x 在后！）**  
+  `lobsterai`   `data[].costMultiplier`   **裸数字** `0.05`  
+  `qoder`   目录 `chat[].price_factor`   **裸数字**，`0` = 免费  
+  `trae`   `display_contact_config.consumption_rate.data.rate`   **裸数字**；该字段本身是 **JSON 字符串，须二次 `JSON.parse`**  
 
 - ⚠️ **`0` 一律是「免费」而非「无倍率」**（三个 provider 皆然），
   用 `> 0` 过滤会恰好漏掉用户最关心的免费模型。展示为「免费」而非 `x0`。
@@ -292,8 +298,15 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 ### 积分领取（每日签到）
 📖 [credits 分册](docs/agents/credits.md)
 
-- 五个面板提供签到：CodeBuddy、LobsterAI、CodeArts、Qoder、TRAE。
-  **WorkBuddy 国内版与国际版都没有**（后端无签到接口）。
+- 有每日签到的渠道（**真相源是 `plugin-src/client/credits-capabilities.js` 的 `dailyCheckin`，不是本列表**）：`codearts`、`buddy` / `buddy-intl`、**`workbuddy-cn`**、`lobsterai`、`qoder` / `qoder-cn`、`trae` / `trae-intl`、`loomy`。
+  **只有 WorkBuddy 国际版（`workbuddy`）没有**；`cline` 没有；`raccoon` 的积分入口是**登录奖励/新手任务**，不是每日签到。
+  ⚠️ **「端点存在性 ≠ 活动存在性」**：四个 WorkBuddy/CodeBuddy 区域**都有**
+  `POST /v2/billing/meter/checkin-activity-status` 与 `/daily-checkin` 两个端点，
+  差异只在**活动位是否下发**。`workbuddy-cn` 曾因「国际版无接口」这个错误结论
+  被连带误登记为 `dailyCheckin:false`（2026-10-01 实测修正，用户因此少领每日 100 积分×2）。
+  ⚠️ **判定端点是否存在必须用「候选路径 vs 随机路径」对照组**：很多 origin（如
+  火山 Ark）对**任意**路径都返回同一个 401，单看候选路径的状态码会把「路由兜底」
+  误读成「端点存在」。
 - ⚠️ **幂等判据是响应体字段，不是 HTTP 状态码**：重复领取同样返回 200 / `code:0`，
   必须看响应体（如 Qoder 的 `replayed:true`、CodeBuddy 的 `code:10001`）。
 - ⚠️ **不支持签到的 provider 必须如实返回 `null` 状态**，不得臆造状态对象。
@@ -308,6 +321,21 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 `supportsCreditBalance` / `supportsDailyCheckin` **分别**判定两项能力。
 为 false 时**不得**发起对应请求，也不应渲染相关 UI。
 ⚠️ 该表必须与 `PROVIDERS` 列表**等集**（由单测断言）。
+
+### 代码门禁（`pnpm lint`，零依赖）
+
+`scripts/lint.mjs` 在 CI 里排在 `typecheck` **之前**（秒级、最快失败）。它只查本仓库**真实踩过**的坑：
+
+- `tests/` 里 `.only(` —— 提交后 CI 会**静默跳过**其余全部用例；
+- `@ts-ignore`（要求改 `@ts-expect-error` + 原因）、`src/` 里 `: any`；
+- `src/` 里把裸 `fetch` 存进**字段**（`private x: typeof fetch = fetch`）= 构造期捕获，
+  运行时装上的 fetch 补丁会静默失效 —— 必须写成 getter 或函数默认参数；
+- **provider 三方等集**：`plugin-src/client/jet-hub.js` 的 `PROVIDERS` ⊆
+  `credits-capabilities.js` 的能力表，且 ⊆ `src/index.ts` 的 `'llm-<id>'` 设置命名空间（见上文清单第 3/9/10 项）；
+- 两条**只可下调**的棘轮基线：`src/` 的 `as unknown as` ≤ 26、`console.*` ≤ 10。
+
+⚠️ 每条正则规则都带「必须命中 / 必须不命中」样本，启动时自检。**不要**把自检样本改成能通过的形式来"修"失败 ——
+它存在的意义就是抓「规则写死了、看起来一片绿」这种假门禁（首版 `no-fetch-capture` 正则就曾完全不匹配任何反模式）。
 
 ### TRAE 协议要点
 📖 [trae 分册](docs/agents/trae.md)（**必读**，36 KB 完整记录）
@@ -365,6 +393,7 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
      - 清洗命令：`pnpm sanitize`（自动识别并替换已知敏感特征）
      - 校验命令：`pnpm check:secrets`（若存在未脱敏数据则退出码为 1 并拦截）
    - Git Hook 集成：本地已部署 `.git/hooks/pre-push`，推送前自动运行 `check:secrets` 拦截违规提交。
+   - CI 门禁：`.github/workflows/ci.yml` 在 push / PR 时依次执行 `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm check:secrets`（Hook 可被 `--no-verify` 绕过，CI 不可）。
 
 ---
 
@@ -387,6 +416,7 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 ### 调试
 
 - 使用 `pnpm typecheck` 快速验证类型
+- 使用 `pnpm lint` 跑零依赖门禁（`scripts/lint.mjs`，约 1 秒；`pnpm lint --self-test` 只校验规则本身没写死）
 - E2E 测试需要设置环境变量（如 `DSH_CODEARTS_E2E=1`），
   部分用例需在打开的浏览器中人工点击授权
 - 构建错误检查 `lib/` 是否存在以及 `tsconfig.json` 的 include/exclude
@@ -407,7 +437,12 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   - Loomy 不会因积分耗尽报错，而是**静默降级**为扣永久积分，既有报错换号机制无效。
   - 必须由适配器在 `resolveCredential` 中接收 `modelId` 并透传，先过滤「未停用 + 该模型未受限」的候选账号，再按余额分档：优先消耗每日赠送额度，其次消耗永久积分。
   - 档内保持手动拖拽顺序，查询失败归最后一档；调用 `getAvailableAccount` 兜底。
-- **位置参数注意点**：`registerJetHubRpc` 采用位置参数传递各 provider 服务实例，新增服务时需严格维护形参位置顺序，避免错位。
+- **具名对象（P1-⑤ 已重构）**：`registerJetHubRpc(ctx, services)` 只收两个参数，`services` 是
+  `JetHubRpcServices`（`src/jet-hub-rpc.ts:525`）。新增服务只需在该接口里加一个字段 ——
+  少接 / 接错字段名是**编译错误**，不再有「位置接错却完全相同类型」的静默错位风险。
+  ⚠️ 重构前是 **18 个位置参数**：新增 provider 时测试侧漏改位置实参，
+  导致用例**静默错位**。端点实现已按领域拆到 `src/rpc/*.ts`
+  （`account` / `login` / `onboarding` / `credits` / `models` / `backup` + `contracts.ts`）。
 
 ## LLM Provider 约定
 

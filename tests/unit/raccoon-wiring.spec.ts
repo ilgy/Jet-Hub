@@ -66,9 +66,10 @@ describe('Raccoon 在 index.ts 的接线', () => {
   })
 
   it('registerJetHubRpc 传入了 raccoon', () => {
-    // ⚠️ 不限定 raccoon 与 modelAdapters 之间的具体实参：将来新增 provider
-    // 会在此处插入新参数，写死顺序会让每次扩展都误报失败。
-    expect(indexSource).toMatch(/registerJetHubRpc\([\s\S]*?raccoon,[\s\S]*?modelAdapters\)/)
+    // ⚠️ P1-⑤ 起形参是**具名对象**：`raccoon` 是字段名，不再是位置实参。
+    // 仍不限定 raccoon 与 modelAdapters 之间还有哪些字段：将来新增 provider
+    // 会在此处多一个字段，写死整串会让每次扩展都误报失败。
+    expect(indexSource).toMatch(/registerJetHubRpc\(ctx, \{[\s\S]*?\n\s*raccoon,[\s\S]*?modelAdapters,/)
   })
 
   it('fetchRemoteModels 委托给 RaccoonAuth.fetchModels', () => {

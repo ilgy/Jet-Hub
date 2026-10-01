@@ -45,8 +45,46 @@ describe('积分能力矩阵', () => {
 
   it('WorkBuddy 国际版支持余额但不支持签到（余额与签到是彼此独立的能力）', () => {
     // 这条断言专治「因为国际版没有签到，就推断也查不到余额」的错误推断。
+    //
+    // ⚠️ 2026-10-01 修正**理由**（结果不变）：旧注释称「国际版后端无签到
+    // 接口」，实测证伪 —— 端点存在（对照组探针：候选路径 401 vs 随机路径
+    // 404），真实原因是该区域**签到活动位不下发**：`checkin-activity-status`
+    // 返回 `active:false / total_credits:0 / start_time:""`，`daily-checkin`
+    // 返回 `code 10001`「签到活动未开启或已过期」。
+    // 故这里仍需为 false，但不可再写「无接口」。
     expect(supportsCreditBalance('workbuddy')).toBe(true)
     expect(supportsDailyCheckin('workbuddy')).toBe(false)
+  })
+
+  it('WorkBuddy 国内版支持每日签到（旧登记为 false 是缺陷，2026-10-01 实测修正）', () => {
+    // 真实缺陷：能力矩阵把 `workbuddy-cn` 登记为 `dailyCheckin: false`，
+    // 于是面板**不渲染**「一键领取积分」按钮 —— 而该区域自 2026-09-30 起
+    // 有「Buddy加油站」活动（season 10）。用户账号池里当时有 2 个
+    // `workbuddy-cn` 账号、当天均已签到、各 200 积分，却完全没有领取入口。
+    //
+    // 实测证据（用池里真实凭据、生产同款请求头）：
+    //   POST https://copilot.tencent.com/v2/billing/meter/checkin-activity-status
+    //   → HTTP 200 {"code":0,"data":{"active":true,"today_checked_in":true,
+    //     "streak_days":2,"daily_credit":100,"total_credits":200,
+    //     "activity_name":"Buddy应用","season":10}}
+    //   POST .../daily-checkin（重放）→ HTTP 400
+    //     {"code":10001,"msg":"今天已签到，请明天再来"}（余额不变，幂等安全）
+    //
+    // 与 `workbuddy`（国际版）同路径、同请求头，**仅端点区域不同**；
+    // 这与 `buddy` / `buddy-intl` 的关系同型。协议层无需改动
+    //（`src/rpc/credits.ts` 的 `productById(req.provider)` 已能解析
+    // `workbuddy-cn`，默认 precheck 也正确），缺陷只在客户端能力门控。
+    expect(CREDITS_CAPABILITIES['workbuddy-cn'])
+      .toEqual({ balance: true, dailyCheckin: true })
+    expect(supportsCreditBalance('workbuddy-cn')).toBe(true)
+    expect(supportsDailyCheckin('workbuddy-cn')).toBe(true)
+  })
+
+  it('CodeBuddy 国际版同样支持两项能力（与 buddy 同协议、仅端点不同）', () => {
+    // 与 `buddy` 同型：不要把「区域变体」误判成「无能力」。
+    expect(CREDITS_CAPABILITIES['buddy-intl'])
+      .toEqual({ balance: true, dailyCheckin: true })
+    expect(supportsDailyCheckin('buddy-intl')).toBe(true)
   })
 
   it('Qoder 两项能力都有（余额 + 每日领取）', () => {

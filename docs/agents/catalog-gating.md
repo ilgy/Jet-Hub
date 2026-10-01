@@ -31,9 +31,10 @@
 `disabled`；`listAllModels` 缺失时才退化为「listModels + 裸 id 补回」的历史行为。
 
 ⚠️ **`ctx.llm` 不透传自定义方法**（DSH 只保证 `listModels`），所以适配器实例必须
-由 `index.ts` 显式收集成 `modelAdapters` 传给 `registerJetHubRpc`。五个
-`register*Llm` 因此都**返回适配器实例**（而非 `void`）。加新 provider 时别忘两处：
-`listAllModels()` + 在 `index.ts` 的 `modelAdapters` 里登记。
+由 `index.ts` 显式收集成 `modelAdapters`，作为 `registerJetHubRpc(ctx, { ..., modelAdapters })`
+具名对象里的一个字段（`JetHubRpcServices.modelAdapters`，**唯一可选字段**），
+传给 `registerJetHubRpc`。各 `register*Llm` 因此都**返回适配器实例**（而非 `void`）。
+加新 provider 时别忘两处：`listAllModels()` + 在 `index.ts` 的 `modelAdapters` 映射里登记。
 
 ⚠️ **同名消歧必须基于未过滤的全量集合**（`displayNameFor(model, source)` 而非
 `listed`）：用过滤后的集合会让「关掉其中一个同名模型」改变另一个的变体标记，
@@ -77,7 +78,7 @@ groups: catalog.flatMap(...).filter(group => group.models.length > 0)
 | 判据是**凭据可解析** | 服务层的 `logout()` **只 unset 凭据、保留账号条目**（删条目是另一条路径 `removeAccount`）。若只看「有条目」，用户登出后模型仍然显示，门控形同虚设 |
 | **不看 `enabled`** | 停用只影响「自动选号」，与「是否已登录」无关。若过滤 `enabled`，把所有账号停用的用户会发现整个 provider 的模型凭空消失。与「续期只看 `refreshable`、不看 `enabled`」是同一条既有约定 |
 
-⚠️ **六个 provider 判据完全一致，没有例外**：早期 CodeArts 曾额外接受固定单凭据
+⚠️ **所有走模型目录的协议族判据完全一致，没有例外**（八个适配器文件：`src/llm-adapter.ts`、`src/buddy-adapter.ts`、`src/lobsterai-adapter.ts`、`src/qoder-adapter.ts`、`src/trae-adapter.ts`、`src/cline-adapter.ts`、`src/loomy-adapter.ts`、`src/raccoon-adapter.ts`；区域变体共用同族适配器）。早期 CodeArts 曾额外接受固定单凭据
 ref（`CODEARTS_ACCESS_TOKEN`），该模式**已移除**，`extraCredentialRefs` 参数一并
 删除。老用户若只用固定 ref 登录过，模型列表会变空 —— 需在 Jet Hub 重新登录一次
 （用户已确认接受，不做自动迁移）。
@@ -171,9 +172,9 @@ ref（`CODEARTS_ACCESS_TOKEN`），该模式**已移除**，`extraCredentialRefs
 
 ---
 
-## 「+ 新建账号」必须两步式返回 loginUrl（五个 provider 一致）
+## 「+ 新建账号」必须两步式返回 loginUrl（全部 provider 一致）
 
-`account.create` 对**全部五个 provider** 都必须在**用户完成授权之前**返回
+`account.create` 对**每一个 provider** 都必须在**用户完成授权之前**返回
 `loginUrl`，由前端立即 `window.open`，后台再异步等回调。
 
 这不是风格偏好，而是浏览器硬约束：`window.open` 只在用户点击后的
@@ -188,6 +189,9 @@ ref（`CODEARTS_ACCESS_TOKEN`），该模式**已移除**，`extraCredentialRefs
 - `lobsterai`：`LobsteraiAuth.startLogin()`（`src/lobsterai-auth.ts`），底层 `startLobsteraiLoginFlow`（`src/lobsterai-oauth.ts`）
 - `qoder`：`QoderAuth.startLogin()`（`src/qoder-auth.ts`），底层 `startQoderLoginFlow`（`src/qoder-oauth.ts`）—— 它是**设备码轮询**，不起本地回调服务器，故没有端口/超时收尾问题
 - `trae`：`TraeAuth.startLogin()`（`src/trae-auth.ts`），底层 `startTraeLoginFlow`（`src/trae-oauth.ts`）。默认回调 `http://127.0.0.1:18080/authorize`；该端口被占用时**自动回退到随机端口**（`redirect_uri` 随之重算，服务端原样回跳，故功能不受影响）。登录 URL 需带 `client_id` / `machine_id` / `device_id`
+- `cline`：`ClineAuth.startLogin()`（`src/cline-auth.ts`），底层 `startClineLoginFlow`（`src/cline-auth.ts`）—— WorkOS **设备码轮询**，同 qoder 不起本地服务器
+- `loomy`：`LoomyAuth.startLogin()`（`src/loomy-auth.ts`），底层 `startLoomyWechatLoginFlow`（`src/loomy-wechat-login.ts`）—— **微信扫码**（另有手机号/短信路径），同样不起本地回调服务器
+- `raccoon`：`RaccoonAuth.startLogin()`（`src/raccoon-auth.ts`），底层 `startRaccoonLoginFlow`（`src/raccoon-login-page.ts`）
 
 要点：
 

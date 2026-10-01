@@ -51,6 +51,7 @@ import {
   stripCourseLeakIfEnabled,
 } from './sse.js'
 import { normalizeHarnessMessages } from './message-shape.js'
+import { errorMessageText } from './http-error.js'
 
 /** 将消息内容载荷展平为纯文本字符串。 */
 export function contentToText(content: unknown): string {
@@ -261,44 +262,17 @@ export function serializeMessages(
   return wire
 }
 
-/** 安全读取 Error.message。 */
-export function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  try { return String(error) } catch { return 'unknown error' }
-}
-
-/** 从错误体提取可读 detail 文本。 */
-export function errorDetail(body: string): string {
-  try {
-    const data = JSON.parse(body) as Record<string, unknown>
-    // ⚠️ `error` 也要认：Cline 的部分错误体是 `{error: "<文案>", success: false}`
-    //（如地域限制 `{"error":"access forbidden: … is not available in your region"}`），
-    // 且它可能是**字符串**也可能是嵌套对象 —— 只认 code/message/msg 会把
-    // 整个 JSON 原样返回，用户看到一坨不可读的裸 JSON。
-    const nested = typeof data.error === 'object' && data.error !== null
-      ? (data.error as Record<string, unknown>).message
-      : data.error
-    const parts = [
-      typeof data.code === 'number' || typeof data.code === 'string' ? `code=${String(data.code)}` : undefined,
-      typeof data.message === 'string' ? data.message : undefined,
-      typeof data.msg === 'string' ? data.msg : undefined,
-      typeof nested === 'string' ? nested : undefined,
-    ].filter((value): value is string => value !== undefined)
-    if (parts.length > 0) return parts.join(' ')
-  } catch {
-    // 非 JSON 错误体
-  }
-  return body
-}
-
-/** 将 HTTP 状态码映射为 harness 错误码。 */
-export function httpErrorCode(status: number): string {
-  if (status === 401 || status === 403) return 'AUTH'
-  if (status === 429) return 'RATE_LIMIT'
-  if (status === 400) return 'INVALID_REQUEST'
-  if (status >= 500) return 'SERVER'
-  return `HTTP_${status}`
-}
+/**
+ * 错误报文归一化与状态码分类：**统一实现在 `src/http-error.ts`**。
+ *
+ * 本文件曾是这三份助手的「发源地」，cline / loomy / qoder 都从这里导入；
+ * 现在它们只做**转发**，实现收敛到中立层，避免 5 份副本各自漂移
+ * （历史上的真实分歧：有的完全不看报文，于是 400 的「上下文超限」被误判成
+ * `INVALID_REQUEST`，长会话越过窗口时直接报错而不触发自动压缩）。
+ *
+ * `errorMessage` 这个旧名字保留为别名 —— 调用方无需改动。
+ */
+export { errorDetail, errorMessageText as errorMessage, httpErrorCode } from './http-error.js'
 
 /**
  * 判断是否为传输级错误（可重试的 TRANSPORT）。
@@ -460,7 +434,7 @@ export async function* consumeOpenAiSse(
         if (options.signal?.aborted) throw error
         if (error instanceof LlmError) throw error
         if (isTransportError(error)) {
-          throw new LlmError(`${label}: sse transport error: ${errorMessage(error)}`, 'TRANSPORT', { cause: error as Error })
+          throw new LlmError(`${label}: sse transport error: ${errorMessageText(error)}`, 'TRANSPORT', { cause: error as Error })
         }
         throw error
       }

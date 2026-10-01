@@ -82,10 +82,10 @@ describe('Loomy 在 index.ts 的接线', () => {
   })
 
   it('registerJetHubRpc 传入了 loomy', () => {
-    // ⚠️ 断言到 `loomy` 与 `modelAdapters` 之间**不限定**具体参数 ——
-    // 每新增一个 provider 都会在这中间插一个实参（raccoon 即如此），
-    // 写死 `cline, loomy, modelAdapters` 会让每次新增 provider 都误报失败。
-    expect(indexSource).toMatch(/registerJetHubRpc\([\s\S]*?loomy,[\s\S]*?modelAdapters\)/)
+    // ⚠️ P1-⑤ 起形参是**具名对象**：`loomy` 是字段名，不再是第 N 个实参。
+    // 仍不限定 `loomy` 与 `modelAdapters` 之间还有哪些字段 ——
+    // 每新增一个 provider 都会多一个字段（raccoon 即如此），写死整串会误报失败。
+    expect(indexSource).toMatch(/registerJetHubRpc\(ctx, \{[\s\S]*?\n\s*loomy,[\s\S]*?modelAdapters,/)
   })
 
   /**

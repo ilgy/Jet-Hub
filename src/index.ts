@@ -892,8 +892,25 @@ export function apply(ctx: Context): void {
     raccoon: raccoonAdapter,
   }
 
-  registerJetHubRpc(
-    ctx, pool, service, buddy, buddyIntl, workbuddy, workbuddyCn,
-    lobsterai, qoder, qoderCn, trae, traeIntl, cline, loomy, raccoon, modelAdapters)
+  // ⚠️ 具名对象传参：少接 / 接错字段是**编译错误**。
+  // 此前是 18 个位置参数，新增 provider 时测试侧漏改两处位置实参，
+  // 让 2 个用例静默错位（接错服务与接对服务在类型上完全等价）。
+  registerJetHubRpc(ctx, {
+    pool,
+    codearts: service,
+    buddy,
+    buddyIntl,
+    workbuddy,
+    workbuddyCn,
+    lobsterai,
+    qoder,
+    qoderCn,
+    trae,
+    traeIntl,
+    cline,
+    loomy,
+    raccoon,
+    modelAdapters,
+  })
   ctx.provide('accountPool', pool)
 }
