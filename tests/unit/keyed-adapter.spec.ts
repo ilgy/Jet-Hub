@@ -400,12 +400,35 @@ describe('registerKeyedLlm', () => {
       warn: () => {},
     })
     expect(providers).toEqual([{
-      provider: 'opencode',
+      provider: 'opencode-zen',
       displayName: 'OpenCode Zen',
-      settingsNs: 'llm-opencode',
+      settingsNs: 'llm-opencode-zen',
       settingsPath: [],
     }])
-    expect(registered).toEqual([{ ids: ['opencode'], adapter }])
+    expect(registered).toEqual([{ ids: ['opencode-zen'], adapter }])
+  })
+
+  it('⚠️ 当 ctx.llm.registerConfigurableProviders 抛错时捕获并记录日志，不阻断插件启动', () => {
+    const warns: string[] = []
+    const registered: unknown[] = []
+    const ctx = {
+      llm: {
+        registerConfigurableProviders: () => {
+          throw new Error('configurable provider "opencode-zen" is already declared')
+        },
+        registerAdapter: (ids: readonly string[], adapter: unknown) => { registered.push({ ids, adapter }) },
+      },
+      schema: { get: () => undefined },
+    }
+    expect(() => registerKeyedLlm(ctx as never, {
+      product: OPENCODE,
+      credentialRef: 'X' as never,
+      resolveCredential: async () => undefined,
+      warn: (msg) => warns.push(msg),
+    })).not.toThrow()
+    expect(warns.length).toBe(1)
+    expect(warns[0]).toContain('configurable provider opencode-zen')
+    expect(registered.length).toBe(1)
   })
 })
 

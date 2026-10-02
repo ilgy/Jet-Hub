@@ -190,7 +190,7 @@ const PROVIDERS = Object.freeze([
   // 否则就是「空壳面板」（能看见但什么都不工作）。由 `tests/unit/plugin.spec.ts`
   // 与 `scripts/lint.mjs` 的 `provider-panel-parity` 双向锁死。
   { id: 'commandcode', label: 'Command Code', icon: COMMANDCODE_ICON, logoClass: 'keyed' },
-  { id: 'opencode', label: 'OpenCode Zen', icon: OPENCODE_ICON, logoClass: 'keyed' },
+  { id: 'opencode-zen', label: 'OpenCode Zen', icon: OPENCODE_ICON, logoClass: 'keyed' },
 ]);
 
 /**
@@ -205,7 +205,7 @@ const PROVIDERS = Object.freeze([
  * 判据一旦散落成 `provider === 'xxx' || provider === 'yyy'`，每加一个平台
  * 就得把所有分支都找出来改一遍，必然漏。
  */
-const KEYED_PROVIDER_IDS = Object.freeze(['commandcode', 'opencode']);
+const KEYED_PROVIDER_IDS = Object.freeze(['commandcode', 'opencode-zen']);
 
 /**
  * 积分能力判定见 `./credits-capabilities.js`。

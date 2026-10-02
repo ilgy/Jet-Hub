@@ -2330,7 +2330,7 @@ Key 的形态预检（`keyedApiKeyLooksMalformed`）**只拦结构性错误**：
 
 ```js
 commandcode: { balance: false, dailyCheckin: false },
-opencode:    { balance: false, dailyCheckin: false }
+'opencode-zen': { balance: false, dailyCheckin: false }
 ```
 
 ⚠️ 这里的 `false` **不是「还没实现」，而是能力边界**：两家平台的额度由平台决定，

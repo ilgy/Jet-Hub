@@ -558,13 +558,31 @@ export function recordsKeyedRateLimit(status: number): boolean {
 /** 注册适配器到 `ctx.llm`。 */
 export function registerKeyedLlm(ctx: Context, options: KeyedAdapterOptions): KeyedAdapter {
   const product = options.product
-  ctx.llm.registerConfigurableProviders([{
-    provider: product.id,
-    displayName: product.displayName,
-    settingsNs: settingsNamespaceFor(ctx, `llm-${product.id}`),
-    settingsPath: [],
-  }])
+  try {
+    ctx.llm.registerConfigurableProviders([{
+      provider: product.id,
+      displayName: product.displayName,
+      settingsNs: settingsNamespaceFor(ctx, `llm-${product.id}`),
+      settingsPath: [],
+    }])
+  } catch (err: unknown) {
+    const msg = `[Jet Hub] Failed to register configurable provider ${product.id}: ${String(err)}`
+    if (options.warn) {
+      options.warn(msg)
+    } else {
+      (ctx as { logger?: { warn?: (m: string) => void } }).logger?.warn?.(msg)
+    }
+  }
   const adapter = new KeyedAdapter(options)
-  ctx.llm.registerAdapter([product.id], adapter)
+  try {
+    ctx.llm.registerAdapter([product.id], adapter)
+  } catch (err: unknown) {
+    const msg = `[Jet Hub] Failed to register adapter for ${product.id}: ${String(err)}`
+    if (options.warn) {
+      options.warn(msg)
+    } else {
+      (ctx as { logger?: { warn?: (m: string) => void } }).logger?.warn?.(msg)
+    }
+  }
   return adapter
 }

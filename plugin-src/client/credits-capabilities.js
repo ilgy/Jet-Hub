@@ -116,7 +116,7 @@ export const CREDITS_CAPABILITIES = Object.freeze({
   // 及 `src/keyed-product.ts` 的 `ALL_KEYED_PRODUCTS` 等集**（由
   // `tests/unit/plugin.spec.ts` 与 `scripts/lint.mjs` 双向锁死）。
   commandcode: Object.freeze({ balance: false, dailyCheckin: false }),
-  opencode: Object.freeze({ balance: false, dailyCheckin: false }),
+  'opencode-zen': Object.freeze({ balance: false, dailyCheckin: false }),
 });
 
 /**

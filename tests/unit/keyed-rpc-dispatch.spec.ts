@@ -149,7 +149,7 @@ describe('「粘贴 Key」族的 RPC 分派', () => {
 describe('「粘贴 Key」族的客户端接线', () => {
   it('面板列表含本族两个 provider（否则服务端注册了也无入口）', () => {
     expect(optionSource).toMatch(/\{\s*id:\s*'commandcode',\s*label:/)
-    expect(optionSource).toMatch(/\{\s*id:\s*'opencode',\s*label:/)
+    expect(optionSource).toMatch(/\{\s*id:\s*'opencode-zen',\s*label:/)
   })
 
   it('⚠️ 客户端的 KEYED_PROVIDER_IDS 与服务端产品表等集', () => {
@@ -158,7 +158,7 @@ describe('「粘贴 Key」族的客户端接线', () => {
     const clientIds = [...optionSource.matchAll(/^const KEYED_PROVIDER_IDS = Object\.freeze\(\[([^\]]*)\]\)/gm)][0]?.[1]
     expect(clientIds, '未找到客户端 KEYED_PROVIDER_IDS').toBeDefined()
     const fromClient = [...clientIds!.matchAll(/'([a-z][a-z0-9-]*)'/g)].map(m => m[1]).sort()
-    const fromStub = ['commandcode', 'opencode'].sort()
+    const fromStub = ['commandcode', 'opencode-zen'].sort()
     expect(fromClient).toEqual(fromStub)
     // 服务端产品表里每个 id 都要真的出现一次。
     for (const id of fromClient) {
@@ -217,9 +217,9 @@ describe('「粘贴 Key」族的客户端接线', () => {
   })
 
   it('⚠️ 能力表登记本族为两项皆无（额度由用户自己接的平台决定）', () => {
-    for (const id of ['commandcode', 'opencode']) {
+    for (const id of ['commandcode', 'opencode-zen']) {
       expect(capabilitiesSource, `${id} 缺少负能力登记`).toMatch(
-        new RegExp(`${id}:\\s*Object\\.freeze\\(\\{\\s*balance:\\s*false,\\s*dailyCheckin:\\s*false\\s*\\}\\)`),
+        new RegExp(`(?:'|")?${id}(?:'|")?:\\s*Object\\.freeze\\(\\{\\s*balance:\\s*false,\\s*dailyCheckin:\\s*false\\s*\\}\\)`),
       )
     }
   })

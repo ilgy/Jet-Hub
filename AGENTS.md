@@ -41,7 +41,7 @@
   Cline   `cline`   WorkOS 设备码轮询 + 免费模型识别 + 5 档思考强度  
   讯飞 Loomy   `loomy`   微信扫码 + 手机号/短信登录 + 智能余额选号  
   商汤小浣熊   `raccoon`   二维码扫码/手机验证码 + AES-128 加密 + 积分签到  
-  自带 Key（粘贴 Key）   `commandcode` / `opencode`   **没有登录链**：粘贴 API Key → 校验 → 入库
+  自带 Key（粘贴 Key）   `commandcode` / `opencode-zen`   **没有登录链**：粘贴 API Key → 校验 → 入库
 
 ⚠️ **区域版各占一个 provider**：CodeBuddy `buddy`(国内)/`buddy-intl`(国际)、
 WorkBuddy `workbuddy-cn`(国内)/`workbuddy`(国际)、Qoder `qoder`(国际)/`qoder-cn`(国内)、
@@ -481,7 +481,7 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 - provider 名称（**15 个**）：`codearts` / `buddy` / `buddy-intl` / `workbuddy-cn` /
   `workbuddy` / `lobsterai` / `qoder` / `qoder-cn` / `trae` / `trae-intl` / `cline` /
-  `loomy` / `raccoon` / `commandcode` / `opencode`
+  `loomy` / `raccoon` / `commandcode` / `opencode-zen`
   - ⚠️ 必须与 `plugin-src/client/jet-hub.js` 的 `PROVIDERS` **完全一致**
 - 端点格式为 OpenAI 兼容
 - 请求签名/鉴权方式因 provider 而异：

@@ -209,9 +209,9 @@ export const COMMANDCODE: KeyedProduct = Object.freeze({
  * 虽是**免费**模型，但走 `/responses`，本适配器用不了，同样下架。
  */
 export const OPENCODE: KeyedProduct = Object.freeze({
-  id: 'opencode',
+  id: 'opencode-zen',
   displayName: 'OpenCode Zen',
-  defaultCredentialRef: 'OPENCODE_API_KEY',
+  defaultCredentialRef: 'OPENCODE_ZEN_API_KEY',
   baseUrl: 'https://opencode.ai/zen/v1',
   consoleUrl: 'https://opencode.ai/auth',
   docsUrl: 'https://opencode.ai/docs/zen/',

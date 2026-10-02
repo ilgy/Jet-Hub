@@ -144,7 +144,7 @@ describe('loadKeyedModels', () => {
       JSON.stringify({ data: [{ id: 'jev-1.13-free' }, { id: 'space-bunny-free' }] }),
       { status: 200 },
     ))
-    const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: OPENCODE.baseUrl }), impl)
+    const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode-zen', baseUrl: OPENCODE.baseUrl }), impl)
     expect(models.map(m => m.id)).toEqual(['space-bunny-free'])
   })
 
@@ -153,7 +153,7 @@ describe('loadKeyedModels', () => {
       JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5.5' }] }),
       { status: 200 },
     ))
-    const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: OPENCODE.baseUrl }), impl)
+    const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode-zen', baseUrl: OPENCODE.baseUrl }), impl)
     // `gpt-5.5` 走 /responses，被下架。
     expect(models.map(m => m.id)).toEqual(['big-pickle'])
     expect(models[0]!.free).toBe(true)
@@ -278,9 +278,9 @@ describe('KeyedAuth', () => {
       models: ['a'],
       nickname: 'OpenCode Zen · -abc',
     })
-    expect(credential.product).toBe('opencode')
+    expect(credential.product).toBe('opencode-zen')
     expect(credential.base_url).toBe('https://opencode.ai/zen/v1')
-    expect(credentials.raw('OPENCODE_ACCOUNT_1')).toContain('"product":"opencode"')
+    expect(credentials.raw('OPENCODE_ACCOUNT_1')).toContain('"product":"opencode-zen"')
   })
 
   it('⚠️ refreshAccountCredential 成功也**不改写**凭据（无 expires_in 可写）', async () => {
@@ -316,7 +316,7 @@ describe('KeyedAuth', () => {
 
   it('productId 暴露产品 id（供分派层使用）', () => {
     const { impl } = makeFetch(() => new Response('{}', { status: 200 }))
-    expect(makeAuth(OPENCODE, impl).auth.productId).toBe('opencode')
+    expect(makeAuth(OPENCODE, impl).auth.productId).toBe('opencode-zen')
   })
 
   it('⚠️ fetchImpl 是 getter（构造后装上的 fetch 补丁仍生效）', async () => {

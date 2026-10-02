@@ -35,7 +35,7 @@ import {
 
 describe('KeyedProduct 产品表', () => {
   it('两个平台都在表里，且 id / 展示名 / 端点齐备', () => {
-    expect(ALL_KEYED_PRODUCTS.map(p => p.id)).toEqual(['commandcode', 'opencode'])
+    expect(ALL_KEYED_PRODUCTS.map(p => p.id)).toEqual(['commandcode', 'opencode-zen'])
     for (const product of ALL_KEYED_PRODUCTS) {
       expect(product.displayName.length, product.id).toBeGreaterThan(0)
       expect(product.baseUrl, product.id).toMatch(/^https:\/\//)
@@ -61,7 +61,7 @@ describe('KeyedProduct 产品表', () => {
   })
 
   it('byId / isKeyedProvider / label', () => {
-    expect(keyedProductById('opencode')?.displayName).toBe('OpenCode Zen')
+    expect(keyedProductById('opencode-zen')?.displayName).toBe('OpenCode Zen')
     expect(keyedProductById('byok')).toBeUndefined()
     expect(isKeyedProvider('commandcode')).toBe(true)
     expect(isKeyedProvider('mystery')).toBe(false)
@@ -292,7 +292,7 @@ describe('凭据模型', () => {
   })
 
   it('build 与 parse 往返一致', () => {
-    const built = buildKeyedCredential({ apiKey: '  sk-abc  ', product: 'opencode', baseUrl: 'https://x/v1/', models: ['a'], nickname: 'n' })
+    const built = buildKeyedCredential({ apiKey: '  sk-abc  ', product: 'opencode-zen', baseUrl: 'https://x/v1/', models: ['a'], nickname: 'n' })
     expect(built.access_token).toBe('sk-abc')
     expect(built.base_url).toBe('https://x/v1')
     const parsed = parseKeyedCredential(JSON.stringify(built))
@@ -302,13 +302,13 @@ describe('凭据模型', () => {
   it('⚠️ 请求头只有 Authorization + Accept，不伪造任何厂商头', () => {
     // 实测：opencode 的免费档位在服务端按「是否来自 OpenCode 客户端」判定，
     // 伪造 x-opencode-client / x-zen-client / UA **一律无效**（仍 403）。
-    const headers = keyedHeaders(buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: 'https://x/v1' }))
+    const headers = keyedHeaders(buildKeyedCredential({ apiKey: 'k', product: 'opencode-zen', baseUrl: 'https://x/v1' }))
     expect(Object.keys(headers).sort()).toEqual(['Accept', 'Authorization'])
     expect(headers.Authorization).toBe('Bearer k')
   })
 
   it('isKeyedExpired 只在显式写了过期时间时才可能为真', () => {
-    const noExpiry = buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: 'https://x/v1' })
+    const noExpiry = buildKeyedCredential({ apiKey: 'k', product: 'opencode-zen', baseUrl: 'https://x/v1' })
     expect(isKeyedExpired(noExpiry, Date.now() + 10 ** 12)).toBe(false)
     expect(isKeyedExpired({ ...noExpiry, expire_time: 100 }, 200)).toBe(true)
     expect(isKeyedExpired({ ...noExpiry, expire_time: 300 }, 200)).toBe(false)
@@ -338,9 +338,9 @@ describe('凭据模型', () => {
 
   it('单凭据 ref 名由产品 id 派生', () => {
     expect(keyedCredentialRefName('commandcode')).toBe('COMMANDCODE_API_KEY')
-    expect(keyedCredentialRefName('opencode')).toBe('OPENCODE_API_KEY')
+    expect(keyedCredentialRefName('opencode-zen')).toBe('OPENCODE_ZEN_API_KEY')
     expect(COMMANDCODE.defaultCredentialRef).toBe(keyedCredentialRefName('commandcode'))
-    expect(OPENCODE.defaultCredentialRef).toBe(keyedCredentialRefName('opencode'))
+    expect(OPENCODE.defaultCredentialRef).toBe(keyedCredentialRefName('opencode-zen'))
   })
 
   it('base url 形状检查', () => {

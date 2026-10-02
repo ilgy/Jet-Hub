@@ -87,7 +87,7 @@ function panelProviderIds(): string[] {
  * 两者的一致性由 `plugin.spec.ts` 的面板等集断言与
  * `scripts/lint.mjs` 的 `provider-panel-parity` 双向守住。
  */
-const KEYED_PROVIDER_IDS: readonly string[] = ['commandcode', 'opencode']
+const KEYED_PROVIDER_IDS: readonly string[] = ['commandcode', 'opencode-zen']
 
 /** 构造只记录调用的服务替身。 */
 function makeServiceStub(name: string, calls: RefreshCall[]) {

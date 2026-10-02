@@ -157,7 +157,7 @@ export function apply(ctx: Context): void {
     'llm-buddy', 'llm-buddy-intl', 'llm-workbuddy-cn', 'llm-workbuddy',
     'llm-codearts', 'llm-lobsterai',
     'llm-qoder', 'llm-qoder-cn', 'llm-trae', 'llm-trae-intl',
-    'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-commandcode', 'llm-opencode',
+    'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-commandcode', 'llm-opencode-zen',
   )
   const service = new CodeArtsAuth(ctx)
   const pool = new AccountPool(ctx)
