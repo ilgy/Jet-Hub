@@ -35,7 +35,7 @@ import type { TraeAuth } from './trae-auth.js'
 import type { ClineAuth } from './cline-auth.js'
 import type { LoomyAuth } from './loomy-auth.js'
 import type { RaccoonAuth } from './raccoon-auth.js'
-import type { ByokAuth } from './byok-auth.js'
+import type { KeyedAuth } from './keyed-auth.js'
 import type { RaccoonCredential } from './raccoon.js'
 import { QODER, QODER_CN } from './qoder-product.js'
 import { TRAE, TRAE_INTL } from './trae-product.js'
@@ -538,13 +538,17 @@ export interface JetHubRpcServices {
   loomy: LoomyAuth
   raccoon: RaccoonAuth
   /**
-   * BYOK（用户自备 API Key）认证服务。
+   * 「粘贴 API Key」族认证服务（`provider id → KeyedAuth`）。
    *
-   * ⚠️ 它**不是**一个「登录式」provider：没有 `startLogin()`，凭据由用户在
-   * 前端弹窗里粘贴，经 `login.submitKey` 校验后写入。`account.create` 对它
+   * ⚠️ 它们**不是**「登录式」provider：没有 `startLogin()`，凭据由用户在
+   * 前端弹窗里粘贴，经 `login.submitKey` 校验后写入。`account.create` 对它们
    * 只建占位条目（`loginMode: 'key'`），不发任何网络请求。
+   *
+   * 用 Map 而非具名字段：本族会继续增加平台（每加一个只需在
+   * `src/keyed-product.ts` 的表里添一行），具名字段会让每加一个平台都要改
+   * `JetHubRpcServices` 接口 —— 那正是历史上「漏改一处就出空壳面板」的成因。
    */
-  byok: ByokAuth
+  keyed: ReadonlyMap<string, KeyedAuth>
   /**
    * 适配器实例映射（`provider → listAllModels()` 来源）。
    *
@@ -731,7 +735,7 @@ function registerJetHubEndpoints(
     cline: services.cline,
     loomy: services.loomy,
     raccoon: services.raccoon,
-    byok: services.byok,
+    keyed: services.keyed,
     modelAdapters: services.modelAdapters,
     buddyAuthForProduct,
     qoderAuthForProduct,

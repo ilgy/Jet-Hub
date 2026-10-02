@@ -23,13 +23,13 @@
   [`docs/agents/credits.md`](docs/agents/credits.md)   各 provider 的签到协议、幂等判据、能力矩阵门控   改 `src/*-credits.ts` / `credits-capabilities.js`  
   [`docs/agents/catalog-gating.md`](docs/agents/catalog-gating.md)   模型黑名单、账号门控、`listAllModels` 契约、两步式登录   改 `listModels` / `model.list` RPC  
   [`docs/agents/qoder.md`](docs/agents/qoder.md)   Qoder 积分端点实测、幂等判据、`openai-compat.ts` 边界   改 `src/qoder*.ts` / `openai-compat.ts`  
-  [`docs/agents/byok.md`](docs/agents/byok.md)   自带 Key 的校验判据、平台表维护、换号与昵称规则   改 `src/byok*.ts` / `login.submitKey`  
+  [`docs/agents/keyed.md`](docs/agents/keyed.md)   自带 Key 渠道的校验判据（**必须打 chat 端点**）、免费后缀判定、产品表维护   改 `src/keyed*.ts` / `login.submitKey`  
 
 ---
 
 ## 项目概述
 
-本项目是 DeepSeek Harness 的一个插件（`dsh-codearts-auth`），提供华为云 CodeArts 浏览器登录与凭据管理功能。插件演进涵盖了七个 LLM provider 路由核心骨架及其区域版本，全量支持 **14 个 provider**，分属 8 套互不相同的协议族：
+本项目是 DeepSeek Harness 的一个插件（`dsh-codearts-auth`），提供华为云 CodeArts 浏览器登录与凭据管理功能。插件演进涵盖了七个 LLM provider 路由核心骨架及其区域版本，全量支持 **15 个 provider**，分属 8 套互不相同的协议族：
 
   协议族   provider   特点  
  --- --- --- 
@@ -41,7 +41,7 @@
   Cline   `cline`   WorkOS 设备码轮询 + 免费模型识别 + 5 档思考强度  
   讯飞 Loomy   `loomy`   微信扫码 + 手机号/短信登录 + 智能余额选号  
   商汤小浣熊   `raccoon`   二维码扫码/手机验证码 + AES-128 加密 + 积分签到  
-  自带 Key（BYOK）   `byok`   **没有登录链**：粘贴第三方 API Key → 校验 → 入库，可覆盖 26 个平台  
+  自带 Key（粘贴 Key）   `commandcode` / `opencode`   **没有登录链**：粘贴 API Key → 校验 → 入库
 
 ⚠️ **区域版各占一个 provider**：CodeBuddy `buddy`(国内)/`buddy-intl`(国际)、
 WorkBuddy `workbuddy-cn`(国内)/`workbuddy`(国际)、Qoder `qoder`(国际)/`qoder-cn`(国内)、
@@ -71,19 +71,30 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   （`BUDDY_DETAIL_OPTIONS`、`CODEARTS_DETAIL_OPTIONS`、`quota` 开关等）。
   ⚠️ `400` 必须先过 `isContextOverflow` 再回退 `INVALID_REQUEST`，
   且判据要看**完整远端报文**（只看 `errorDetail` 会丢掉 `extError`/`displayMsg` 而漏判）。
-- **BYOK**：与上面七族**形态完全不同** —— 它没有厂商登录链、没有 refresh 端点、
-  没有身份头，只有一个 `base_url` + 用户自己的 Key。
-  ⚠️ 因此 `account.create` 对它**不返回 `loginUrl`**（返回空串 + `loginMode: 'key'`），
+- **自带 Key 渠道（`commandcode` / `opencode`）**：与上面七族**形态完全不同** ——
+  没有厂商登录链、没有 refresh 端点、没有身份头，只有一个固定端点 + 用户自己的 Key。
+  ⚠️ 因此 `account.create` 对它们**不返回 `loginUrl`**（返回空串 + `loginMode: 'key'`），
   客户端必须在 `if (loginUrl)` **之前**分流，否则会落进「后端未返回登录地址」的 else 分支。
-  ⚠️ 它的模型目录**是自动刷新的**（TTL 5 分钟 + 账号指纹变更立即重拉 + 集合真变时
+  ⚠️ **Key 校验必须打 chat 端点，`GET /models` 完全不可信** —— 两家平台的目录端点
+  都**不鉴权**（无 Key 同样 200 + 完整模型列表），拿它当校验会让任意字符串都判「有效」。
+  探测模型必须是**免费档位**（每次粘贴 Key 都会跑一次，用计费模型会真的扣钱）。
+  ⚠️ opencode 的判据必须**连报文一起判**：`AuthError`（Key 无效）与 `ModelError`
+  （模型不该走这条路径）**都是 401**，只看状态码会让用户反复重粘一个正确的 Key。
+  ⚠️ 端点**只认服务端产品表**（`keyedProductById(provider).baseUrl`），
+  `login.submitKey` 完全不采信前端传的 `platform` / `baseUrl`。
+  ⚠️ 它们的模型目录**是自动刷新的**（TTL 5 分钟 + 账号指纹变更立即重拉 + 集合真变时
   `broadcastCatalogChanged(ctx)` 广播），与其余 13 个 provider 的「首个成功即永久缓存」
   **有意不同** —— 照抄别的适配器会把「平台上新模型 / 新贴一个 Key 都看不到」重新引进来。
-  ⚠️ 「免费」标记**只在平台自己报了价格**（`pricing.prompt/completion` 或
-  `input/output_token_price_per_m` 确凿为 `0`）或平台表的 `freeModels` 显式列出时才加；
-  **无标记的语义是「未知」，绝不能反推成收费或免费**。`freeModels` 只收实测
-  `POST /chat/completions`（`max_tokens:1`）返回 2xx 的 id（智谱的
-  `glm-4-flash` 系列能调但 `/models` 不下发，不配就只剩收费模型）。
-  详见 [byok 分册](docs/agents/byok.md)。
+  ⚠️ 「免费」标记**只认模型 id 的名字后缀**（`-free` / `:free` / `_free`）。
+  **绝不能把「实测能调通」标成免费** —— 那是**单个 Key 的权益**，不是平台公开事实
+  （实测 commandcode 这个 Key 有 55 个模型能调通，其中 52 个不带 `free` 后缀，
+  换一个账号很可能 403）。把它们标成免费会让别的用户在计费模型上毫无防备。
+  ⚠️ 不能用 `/chat/completions` 调的模型**必须从目录里下架**
+  （commandcode 的 10 个 claude 要走 `/messages`；opencode 的 `jev-1.13` 走 `/systemone`）
+  —— 列出来却调不通比不列更糟。
+  ⚠️ `account.refresh` **刻意不给它们写 `case`**：放在 `default:` 里查 `keyed` Map，
+  这样以后加平台不必再动那个 switch（逐个 `case` 漏写正是历史缺陷的成因）。
+  详见 [keyed 分册](docs/agents/keyed.md)。
 
 - **包名**：`dsh-codearts-auth`
 - **入口**：`lib/index.js`（宿主侧）、`lib/client/jet-hub.js`（客户端 bundle）
@@ -461,9 +472,9 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
 
 ## LLM Provider 约定
 
-- provider 名称（**14 个**）：`codearts` / `buddy` / `buddy-intl` / `workbuddy-cn` /
+- provider 名称（**15 个**）：`codearts` / `buddy` / `buddy-intl` / `workbuddy-cn` /
   `workbuddy` / `lobsterai` / `qoder` / `qoder-cn` / `trae` / `trae-intl` / `cline` /
-  `loomy` / `raccoon` / `byok`
+  `loomy` / `raccoon` / `commandcode` / `opencode`
   - ⚠️ 必须与 `plugin-src/client/jet-hub.js` 的 `PROVIDERS` **完全一致**
 - 端点格式为 OpenAI 兼容
 - 请求签名/鉴权方式因 provider 而异：
@@ -472,8 +483,10 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   - `lobsterai`：Bearer + `X-LobsterAI-Client-*`（**无签名**）
   - `qoder`：推理请求头**由 WASM 生成**（含签名），**必须原样透传**；余额端点另走 `Bearer`
   - `trae`：`Cloud-IDE-JWT <token>` + 十余个 `X-*` 身份头（**无签名**）
-  - `byok`：`Authorization: Bearer <用户自己的 Key>` + `Accept`（**只有这两个头**，
-    不带任何厂商身份头；请求打在**凭据自己的 `base_url`** 上，不同平台各不相同）
+  - `commandcode` / `opencode`：`Authorization: Bearer <用户自己的 Key>` + `Accept`
+    （**只有这两个头**，不带任何厂商身份头；请求打在**产品表里的固定端点**上）。
+    ⚠️ 不要试图伪装「官方客户端」头/UA：opencode 的免费档位在服务端判定，
+    实测 `x-opencode-client` / `x-zen-client` / 各种 UA **一律无效**（仍 403）
 - provider 在 `ctx.llm` 上注册，配置在 profile 中可选
 - **产品配置平行而非继承**：`BuddyProduct`（`src/product.ts`）/
   `LobsteraiProduct` / `QoderProduct` / `TraeProduct` 各自独立。

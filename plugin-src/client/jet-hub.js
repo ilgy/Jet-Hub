@@ -143,17 +143,19 @@ const LOOMY_ICON = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg"
 const RACCOON_ICON = 'data:image/png;base64,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';
 
 /**
- * BYOK（用户自备 API Key）面板图标：内联 SVG data URL（灰底白字钥匙）。
+ * 「粘贴 API Key」族面板图标：内联 SVG data URL。
  *
- * ⚠️ 与其余 13 个 provider 的图标形态**刻意不同**：那些是「某个厂商的品牌
- * 标志」，而 BYOK 是一个**渠道类别**（可接 26 个平台），没有单一品牌可画。
- * 故用中性灰底 + 钥匙符号，与左边那一列彩色品牌图标形成区分。
+ * ⚠️ 与其余 provider 的图标形态**刻意不同**：那些是「某个厂商的品牌标志」，
+ * 而这两个是**渠道**（用户自带 Key，额度由对方平台决定），品牌感弱。
+ * 故用中性底色 + 符号，与左边那一列彩色品牌图标形成区分。
  *
  * 不用第三方图标库：本 bundle 只 external react/react-dom，没有图标依赖，
  * 加一个图标库只为一张 20×20 的图不划算。内联 SVG 与 LobsterAI / Qoder /
  * TRAE / Loomy 的做法一致（体积小、无色差、白底容器里清晰）。
  */
-const BYOK_ICON = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Crect width="24" height="24" rx="6" fill="%2357606a"/%3E%3Cpath d="M15.5 7.5a3.5 3.5 0 1 0-3.36 3.49l-.6.6H10v1.54H8.46v1.54H6.92V16.7l1.9 1.9 1.09-1.09 2.23-2.23a3.5 3.5 0 0 0 3.36-7.78z" fill="white"/%3E%3Ccircle cx="15.5" cy="7.5" r="1.2" fill="%2357606a"/%3E%3C/svg%3E';
+const COMMANDCODE_ICON = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Crect width="24" height="24" rx="6" fill="%232f3640"/%3E%3Cpath d="M9.2 7.4 5 12l4.2 4.6" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/%3E%3Cpath d="M14.8 7.4 19 12l-4.2 4.6" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/%3E%3C/svg%3E';
+
+const OPENCODE_ICON = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Crect width="24" height="24" rx="6" fill="%232f3640"/%3E%3Cpath d="M8.4 7.5h4.1a4.5 4.5 0 0 1 0 9H8.4z" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/%3E%3C/svg%3E';
 
 const PROVIDERS = Object.freeze([
   { id: 'codearts', label: 'CodeArts (华为云)', icon: CODEARTS_ICON, logoClass: 'codearts' },
@@ -175,17 +177,35 @@ const PROVIDERS = Object.freeze([
   // ⚠️ 用『Raccoon (商汤)』而非『Raccoon Work (商汤)』—— 后者在 provider 列表里
   // **触发换行**（用户报障）。与 `RaccoonProduct.displayName` 保持一致。
   { id: 'raccoon', label: 'Raccoon (商汤)', icon: RACCOON_ICON, logoClass: 'raccoon' },
-  // BYOK（用户自备 API Key）：唯一**非厂商**面板项，代表「自己粘贴 Key」这一类。
+  // 「粘贴 API Key」族：**非厂商**面板项，代表「自带 Key」这一类渠道。
   //
   // ⚠️ 与其余 13 项的两点差异：
-  // 1. 面板里**没有「新建账号」的浏览器跳转** —— 点新建后弹的是「选平台 +
-  //    粘贴 Key」表单（`loginMode: 'key'`），不打开外部窗口；
+  // 1. 面板里**没有「新建账号」的浏览器跳转** —— 点新建后弹的是「粘贴 Key」
+  //    表单（`loginMode: 'key'`），不打开外部窗口；
   // 2. 能力表登记 `{ balance:false, dailyCheckin:false }` —— 额度由用户自己
   //    接的那个平台决定，本插件无从查询，故不渲染余额与签到按钮。
   //
-  // 放在最后：它是一个「万能兜底」通道，排在具体厂商之后更符合使用直觉。
-  { id: 'byok', label: 'BYOK (自备 Key)', icon: BYOK_ICON, logoClass: 'byok' },
+  // ⚠️ 必须与服务端 `src/keyed-product.ts` 的 `ALL_KEYED_PRODUCTS` **等集**：
+  // 每个 id 都得有对应的 provider 路由 + 适配器 + settings namespace，
+  // 否则就是「空壳面板」（能看见但什么都不工作）。由 `tests/unit/plugin.spec.ts`
+  // 与 `scripts/lint.mjs` 的 `provider-panel-parity` 双向锁死。
+  { id: 'commandcode', label: 'Command Code', icon: COMMANDCODE_ICON, logoClass: 'keyed' },
+  { id: 'opencode', label: 'OpenCode Zen', icon: OPENCODE_ICON, logoClass: 'keyed' },
 ]);
+
+/**
+ * 「粘贴 API Key」族的 provider id 集合。
+ *
+ * ⚠️ **必须与 `PROVIDERS` 里那一族的 id 保持一致**，且与
+ * `plugin-src/client/credits-capabilities.js` 的 `KEYED_PROVIDERS` 同一份名单
+ * （由 `tests/unit/plugin.spec.ts` 断言）。
+ *
+ * 抽出来是因为客户端有多处要判「这个 provider 是不是自带 Key 的渠道」——
+ * 例如账号卡片的「有效期」行（Key 没有固定有效期）与「新建账号」的分流。
+ * 判据一旦散落成 `provider === 'xxx' || provider === 'yyy'`，每加一个平台
+ * 就得把所有分支都找出来改一遍，必然漏。
+ */
+const KEYED_PROVIDER_IDS = Object.freeze(['commandcode', 'opencode']);
 
 /**
  * 积分能力判定见 `./credits-capabilities.js`。
@@ -396,11 +416,11 @@ function AccountCard({ account, provider, index, order, onToggle, onDelete, onRe
         React.createElement('dd', { 'data-tone': expired ? 'warn' : undefined },
           account.expiresAt
             ? `${formatTime(account.expiresAt) || '未知'}${account.refreshable ? ' · 自动续期' : ''}`
-            // ⚠️ BYOK 的「凭据」是用户自己粘贴的第三方 API Key：对方平台不提供
-            // 过期时间，凭据里自然没有 `expiresAt`。此时一律显示「未知」会让用户
-            // 以为凭据坏了（真实反馈：「BYOK 而且 显示未知？」）—— 不是故障，
-            // 是这一行对 BYOK 不适用，故明说语义而不是留一个悬念。
-            : (provider === 'byok'
+            // ⚠️ 「粘贴 Key」族的「凭据」是用户自己粘贴的第三方 API Key：
+            // 对方平台不提供过期时间，凭据里自然没有 `expiresAt`。此时一律显示
+            // 「未知」会让用户以为凭据坏了（真实反馈过「怎么显示未知？」）
+            // —— 不是故障，是这一行对它不适用，故明说语义而不是留一个悬念。
+            : (KEYED_PROVIDER_IDS.includes(provider)
                 ? React.createElement('span', {
                     title: 'API Key 没有固定有效期；是否仍可用由平台决定（遇 401 请重新粘贴）',
                   }, '不适用（API Key 无固定有效期）')
@@ -1044,28 +1064,33 @@ function ProviderPanel({ provider, rpcCall }) {
   const [showModels, setShowModels] = React.useState(false);
 
   /**
-   * BYOK「粘贴 API Key」表单状态。`null` = 表单未打开。
+   * 「粘贴 API Key」表单状态。`null` = 表单未打开。
    *
    * ## 为什么是一个独立弹窗，而不是复用登录弹窗流程
    *
-   * 其余 13 个 provider 的 `account.create` 都返回 `loginUrl`，前端
+   * 其余 provider 的 `account.create` 都返回 `loginUrl`，前端
    * `window.open` 出去、轮询 `login.poll` 等用户在那个页面里完成授权。
-   * BYOK **没有可打开的页面** —— Key 得用户自己去第三方平台控制台复制，
-   * 而那张控制台不是我们能嵌入的（跨域 + 需要用户自己的账号密码）。
-   * 故 `loginMode === 'key'` 时不开窗、不轮询，就地渲染这个表单。
+   * 本族（`commandcode` / `opencode`）**没有可打开的页面** —— Key 得用户
+   * 自己去平台控制台复制，而那张控制台不是我们能嵌入的
+   * （跨域 + 需要用户自己的账号密码）。故 `loginMode === 'key'` 时不开窗、
+   * 不轮询，就地渲染这个表单。
    *
    * ⚠️ `platforms` **由服务端下发**（`account.create` 响应），不在客户端
-   * 另抄一份：那张表的每个 `baseUrl` 都经过对照组实测校正，抄一份必然漂移。
+   * 另抄一份：那张表的 `baseUrl` 与校验方式都是实测校正过的，抄一份必然漂移。
    */
   const [keyForm, setKeyForm] = React.useState(null);
 
   /**
-   * 提交 BYOK 表单：调 `login.submitKey`，由服务端先 `GET /models` 校验
+   * 提交表单：调 `login.submitKey`，由服务端先打一次平台 chat 端点校验
    * Key、通过后才写凭据。
    *
    * ⚠️ **校验在服务端**，前端不做任何预判（除了空值这种显然的输入错误）：
    * 把「Key 是否有效」的判断放在浏览器意味着 CORS、代理、地域限制都会
    * 变成假阴性，而服务端与真实推理路径走同一个出口。
+   *
+   * ⚠️ 两个平台的目录端点都**不鉴权**，故服务端校验打的是 chat 端点
+   * （详见 `src/keyed-auth.ts`）—— 前端无需知道这个细节，只需展示服务端
+   * 返回的错误文案。
    */
   const submitKey = async () => {
     if (keyForm === null || keyForm.busy) return;
@@ -1074,18 +1099,14 @@ function ProviderPanel({ provider, rpcCall }) {
       setKeyForm(current => current === null ? current : { ...current, error: '请粘贴 API Key' });
       return;
     }
-    if (keyForm.platform === 'custom' && keyForm.baseUrl.trim().length === 0) {
-      setKeyForm(current => current === null ? current : { ...current, error: '自定义平台需要填写 base url' });
-      return;
-    }
     setKeyForm(current => current === null ? current : { ...current, busy: true, error: null });
     try {
       const res = await rpcCall('login.submitKey', {
         accountId: keyForm.accountId,
         provider,
+        // ⚠️ 服务端只看 `provider`（端点取产品表），`platform` 仅作形状兼容。
         platform: keyForm.platform,
         apiKey,
-        baseUrl: keyForm.baseUrl.trim(),
       });
       if (res.done) {
         // 成功：刷新账号列表（昵称会从占位 id 变成「平台 · Key 尾 4 位」），
@@ -1178,23 +1199,23 @@ function ProviderPanel({ provider, rpcCall }) {
       console.log('[jet-hub] account.create response =', res);
       accountId = res.accountId;
       loginUrl = res.loginUrl;
-      // ⚠️ BYOK（`loginMode === 'key'`）**必须在这里就分流**，不能落到下面的
-      // `if (loginUrl)`：它的 `loginUrl` 是**空串**（没有可打开的登录页），
-      // 走那条分支会命中 else 报告「后端未返回登录地址」—— 而实际上后端
-      // 一切正常，只是这个渠道的凭据形态本就不同。
+      // ⚠️ 「粘贴 Key」族（`loginMode === 'key'`）**必须在这里就分流**，不能
+      // 落到下面的 `if (loginUrl)`：它的 `loginUrl` 是**空串**（没有可打开的
+      // 登录页），走那条分支会命中 else 报告「后端未返回登录地址」—— 而实际上
+      // 后端一切正常，只是这个渠道的凭据形态本就不同。
       //
       // 表单所需的数据全部来自本次响应（`platforms` 由服务端下发），
       // 故不需要额外 RPC。
+      //
+      // ⚠️ 本族一个 provider 对应一个固定平台，故 `platforms` 恒只有一项；
+      // 下拉框仍保留（形状统一），但用户改不了端点。
       if (res.loginMode === 'key') {
         const platforms = res.platforms || [];
         setKeyForm({
           accountId,
           platforms,
-          // 默认选第一个平台（国产优先，额度对中国大陆用户最实用）。
-          platform: platforms.length > 0 ? platforms[0].id : 'custom',
+          platform: platforms.length > 0 ? platforms[0].id : provider,
           apiKey: '',
-          // 自定义 base url：只在 platform === 'custom' 时可编辑。
-          baseUrl: '',
           busy: false,
           error: null,
         });
@@ -1641,7 +1662,7 @@ function ProviderPanel({ provider, rpcCall }) {
               accounts.map((account, index) => React.createElement(AccountCard, {
                 key: account.id,
                 account,
-                // 卡片文案要按 provider 分叉（如 BYOK 没有「有效期」概念）。
+                // 卡片文案要按 provider 分叉（如自带 Key 的渠道没有「有效期」概念）。
                 provider,
                 index,
                 busy: probeBusy !== null,
@@ -1672,7 +1693,7 @@ function ProviderPanel({ provider, rpcCall }) {
           onClose: () => setShowModels(false),
         })
       : null,
-    // BYOK「粘贴 API Key」表单：覆盖层，与模型列表同一渲染位。
+    // 「粘贴 API Key」表单：覆盖层，与模型列表同一渲染位。
     // ⚠️ 用户中途关掉表单**不删占位账号**（与 Loomy 短信登录同取舍）：
     // 条目会留在账号池里、无凭据，点「新建账号」可再来一次。这里只清本地状态。
     keyForm
@@ -1698,38 +1719,9 @@ function ProviderPanel({ provider, rpcCall }) {
               }, '取消'))),
           React.createElement('div', { className: 'dim-jh-modalBody' },
             React.createElement('div', { className: 'dim-jh-keyForm' },
-              React.createElement('label', null, '平台',
-                React.createElement('select', {
-                  value: keyForm.platform,
-                  disabled: keyForm.busy,
-                  onChange: (event) => {
-                    const next = event.target.value;
-                    // 切换平台时清掉上一轮的错误，避免「智谱的报错」留在
-                    // 「火山方舟」的选择下面。
-                    setKeyForm(current => current === null ? current : {
-                      ...current, platform: next, error: null,
-                    });
-                  },
-                },
-                  keyForm.platforms.map(platform =>
-                    React.createElement('option', { key: platform.id, value: platform.id },
-                      platform.label)),
-                  React.createElement('option', { value: 'custom' }, '自定义（自己填 base url）'))),
-              // 自定义平台才渲染 base url 输入框：其余平台的地址由服务端
-              // 按平台 id 解析（`login.submitKey` **不采信**前端传的 baseUrl），
-              // 所以这里即便显示了也不允许编辑，避免用户误以为能改。
-              keyForm.platform === 'custom'
-                ? React.createElement('label', null, 'Base URL（OpenAI 兼容，到 /v1 为止）',
-                    React.createElement('input', {
-                      type: 'text',
-                      placeholder: 'https://your-host/v1',
-                      value: keyForm.baseUrl,
-                      disabled: keyForm.busy,
-                      onChange: (event) => setKeyForm(current => current === null ? current : {
-                        ...current, baseUrl: event.target.value, error: null,
-                      }),
-                    }))
-                : null,
+              // ⚠️ 本族一个 provider 对应**一个固定平台**（下拉恒只有一项），
+              // 故不再渲染平台选择器：一个改不动的下拉只会让人误以为能换端点。
+              // 保留「端点」与「去哪儿拿 Key」两类信息即可。
               React.createElement('label', null, 'API Key',
                 React.createElement('input', {
                   type: 'password',
@@ -1743,7 +1735,6 @@ function ProviderPanel({ provider, rpcCall }) {
                   }),
                 })),
               // 平台提示 + 控制台链接：告诉用户「去哪儿拿 Key」。
-              // 自定义平台没有控制台，故不渲染。
               (() => {
                 const platform = keyForm.platforms.find(p => p.id === keyForm.platform);
                 if (platform === undefined) return null;
@@ -1758,8 +1749,12 @@ function ProviderPanel({ provider, rpcCall }) {
                     }, platform.consoleUrl)),
                   React.createElement('div', null,
                     '端点：', platform.baseUrl),
+                  // ⚠️ 这里必须如实说明校验打的是 chat 端点：两个平台的
+                  // `/models` 都**不鉴权**，写「会先请求 /models 校验」是错的
+                  // —— 那正是早期「粘贴 Key」实现留下的过时文案，会让人以为任意字符串
+                  // 都能通过。
                   React.createElement('div', null,
-                    '提交时插件会先请求该端点的 /models 校验 Key，通过后才保存。'));
+                    '提交时插件会先向该平台的对话端点发一次最小请求校验 Key，通过后才保存。'));
               })(),
               keyForm.error
                 ? React.createElement('div', { className: 'dim-jh-keyError', role: 'alert' },

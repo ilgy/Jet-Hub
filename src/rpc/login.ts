@@ -11,15 +11,14 @@
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { LOOMY } from '../loomy-product.js'
 import type { LoomyCredential } from '../loomy.js'
-import { BYOK, byokResolveBaseUrl } from '../byok-product.js'
-import { byokApiKeyLooksMalformed, buildByokNickname } from '../byok.js'
-import { byokPlatformLabel } from '../byok-adapter.js'
+import { keyedProductById } from '../keyed-product.js'
+import { buildKeyedNickname } from '../keyed.js'
 import type { RpcPollLoginRequest, RpcSendSmsRequest, RpcSendSmsResponse, RpcSubmitSmsRequest, RpcSubmitSmsResponse, RpcSubmitKeyRequest, RpcSubmitKeyResponse } from '../types.js'
 import type { RpcResult, JetHubRpcContext, JetHubRpcServices, LoomyPendingSmsMsgid, JetHubModelHelpers } from './contracts.js'
 
 /** `login.*` 端点处理器所需依赖（由 `src/jet-hub-rpc.ts` 装配）。 */
 export type LoginEndpointDeps = JetHubRpcContext
-  & Pick<JetHubRpcServices, 'loomy' | 'byok'>
+  & Pick<JetHubRpcServices, 'loomy' | 'keyed'>
   & Pick<JetHubModelHelpers, 'broadcastCatalogChanged'>
   & { pendingSmsMsgid: LoomyPendingSmsMsgid }
 
@@ -30,7 +29,7 @@ export async function handleLoginMethod(
   deps: LoginEndpointDeps,
   _signal: AbortSignal,
 ): Promise<RpcResult> {
-  const { ctx, pool, loomy, byok, broadcastCatalogChanged, pendingSmsMsgid, } = deps
+  const { ctx, pool, loomy, keyed, broadcastCatalogChanged, pendingSmsMsgid, } = deps
 
   switch (method) {
       case 'login.poll': {
@@ -121,7 +120,7 @@ export async function handleLoginMethod(
         }
       }
       /**
-       * 提交 API Key 完成 BYOK 账号创建（**仅 BYOK**）。
+       * 提交 API Key 完成「粘贴 Key」族账号创建（`commandcode` / `opencode`）。
        *
        * 与 `login.submitSms` 的两处关键差异：
        *
@@ -129,15 +128,21 @@ export async function handleLoginMethod(
        *    若先写后验，一个打不通的 Key 会留下「账号在、模型全空、
        *    报错与真实原因无关」的黑洞（模型目录门控按「凭据能否解析」
        *    判定，该账号**算已登录**，于是既不显示模型也不报错）。
-       * 2. **平台以服务端解析为准**。`baseUrl` 只在 `platform === 'custom'`
-       *    时采信前端传值，其余一律用 `BYOK_PLATFORMS` 表里的 `baseUrl`
-       *    —— 否则前端可以拿一个 `zhipu` 的展示名配上任意地址。
+       * 2. **base url 只认服务端的产品表**。本族一个 provider 对应**一个**平台，
+       *    端点由 `keyedProductById(provider).baseUrl` 决定，**完全不采信**
+       *    前端传的 `baseUrl` —— 否则前端可以拿一个展示名配上任意地址。
+       *
+       * ⚠️ 校验打的是 **chat 端点**（不是 `GET /models`）：两个平台的目录端点
+       * 都**不鉴权**，拿它当校验会让任意字符串都被判「有效」。详见
+       * `src/keyed-auth.ts`。
        *
        * ⚠️ 与 `submitSms` 一致：失败**不删**占位条目，用户可继续重试粘贴。
        */
       case 'login.submitKey': {
         const req = payload as RpcSubmitKeyRequest
-        if (req.provider !== BYOK.id) {
+        const product = keyedProductById(req.provider)
+        const auth = product === undefined ? undefined : keyed.get(product.id)
+        if (product === undefined || auth === undefined) {
           return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${req.provider}` } }
         }
         const account = pool.findAccount(req.accountId)
@@ -147,28 +152,10 @@ export async function handleLoginMethod(
             value: { done: false, error: '账号不存在（可能已被删除）' } satisfies RpcSubmitKeyResponse,
           }
         }
-        const malformed = byokApiKeyLooksMalformed(req.apiKey)
-        if (malformed !== undefined) {
-          return {
-            ok: true,
-            value: { done: false, error: malformed } satisfies RpcSubmitKeyResponse,
-          }
-        }
-        const baseUrl = byokResolveBaseUrl(req.platform, req.baseUrl)
-        if (baseUrl === undefined) {
-          return {
-            ok: true,
-            value: {
-              done: false,
-              error: req.platform === 'custom'
-                ? '请填写自定义 base url（例如 https://your-host/v1）'
-                : `未知平台：${req.platform}`,
-            } satisfies RpcSubmitKeyResponse,
-          }
-        }
         try {
-          // 1) 先校验（`GET /models`）：失败不写凭据、不留半成品。
-          const check = await byok.validateApiKey(req.platform, req.apiKey, req.baseUrl)
+          // 1) 先校验：失败不写凭据、不留半成品。
+          //    ⚠️ base url 由产品表决定，前端传值一律忽略。
+          const check = await auth.validateApiKey(req.apiKey, product.baseUrl)
           if (!check.ok) {
             return {
               ok: true,
@@ -176,17 +163,16 @@ export async function handleLoginMethod(
             }
           }
           // 2) 校验通过后写凭据。
-          const credential = await byok.persistApiKey(account.credentialRef, {
+          const credential = await auth.persistApiKey(account.credentialRef, {
             apiKey: req.apiKey,
-            platform: req.platform,
-            baseUrl,
+            baseUrl: product.baseUrl,
             // 把校验时拉到的模型集**缓存进凭据**：适配器首轮目录加载即便
-            // 失败也能靠它给出可用列表（与「自定义 models 覆盖」同用途）。
+            // 失败也能靠它给出可用列表。
             models: check.models,
-            nickname: buildByokNickname(byokPlatformLabel(req.platform), req.apiKey, req.accountId),
+            nickname: buildKeyedNickname(product.displayName, req.apiKey, req.accountId),
           })
           // 3) 回填账号昵称。
-          //    ⚠️ 昵称只放**平台名 + Key 尾 4 位**（见 `buildByokNickname`）：
+          //    ⚠️ 昵称只放**产品名 + Key 尾 4 位**（见 `buildKeyedNickname`）：
           //    账号卡片会展示它，放前段等于泄露凭据。
           //    ⚠️ `refreshable` 必须是 false（Key 无法续期），
           //    否则 `refreshAll()` 会把死 Key 一路刷到底。
@@ -194,7 +180,7 @@ export async function handleLoginMethod(
             nickname: credential.nickname ?? req.accountId,
             refreshable: false,
           })
-          // 4) 目录已变化（新平台可能带来新模型）→ 广播，让 composer 立即刷新。
+          // 4) 目录已变化（新 Key 可能带来新的模型权益）→ 广播，让 composer 立即刷新。
           broadcastCatalogChanged(ctx)
           return {
             ok: true,

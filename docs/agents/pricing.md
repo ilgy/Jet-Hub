@@ -213,8 +213,7 @@
 **解密该缓存**（`decryptModelCatalog`，`src/qoder-wasm.ts`）：
 
 ⚠️ **第二个参数是 `uid`，不是 `machine_id`**。两个官方调用点容易读反：
-目录缓存的 `readSharedCacheSnapshot(A)` 传 uid，BYOK 的
-`model_cache_decrypt(i, n)` 传 machineId。传错会得到
+目录缓存的 `readSharedCacheSnapshot(A)` 传 uid，按模型解密走 `model_cache_decrypt(i, n)` 时传 machineId。传错会得到
 `AES-GCM decrypt failed: aead::Error` —— 看着像密文损坏，实为参数错。
 调试脚本：`scripts/probe-qoder-catalog-debug.mjs`（两个候选都试）、
 `scripts/probe-qoder-pricing.mjs`（打印 17 个模型的计费字段全貌）

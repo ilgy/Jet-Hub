@@ -98,6 +98,10 @@ async function callRefresh(
     cline: makeServiceStub('cline', calls) as never,
     loomy: makeServiceStub('loomy', calls) as never,
     raccoon: makeServiceStub('raccoon', calls) as never,
+    // 「粘贴 Key」族（commandcode / opencode）共用一张 Map 字段。
+    // 本文件只关心「未知 provider 必须报错」，故给空 Map 即可 ——
+    // 空 Map 下 `mystery` 查不到服务，正好落到 `Unknown provider` 分支。
+    keyed: new Map(),
   })
   const response = await getHandler()(new Request('http://127.0.0.1/api/jet-hub', {
     method: 'POST',

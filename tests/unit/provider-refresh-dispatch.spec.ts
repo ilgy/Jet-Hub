@@ -17,6 +17,12 @@
  *   服务替身收到的 credentialRef 就是该账号自己的 ref（不是默认单凭据 ref）。
  *
  * 于是「新增 provider 但忘了加 refresh 分支」会立刻在这里失败，而不是等用户报障。
+ *
+ * ## 「粘贴 Key」族（commandcode / opencode）的特殊处理
+ *
+ * 它们的「刷新」语义是**有效性探测**（打一次平台 chat 端点），且服务不是具名
+ * 字段而是一张 `keyed` Map（见 `JetHubRpcServices`）。故它们在
+ * `RPC_SERVICE_FIELD` 之外单独登记，替身按 provider id 建、塞进同一张 Map。
  */
 
 import { readFileSync } from 'node:fs'
@@ -40,6 +46,10 @@ interface RefreshCall {
  * 少接 / 接错字段是**编译错误**，故本表只用于「按 provider id 构造替身」，不再
  * 承载任何位置契约；「服务名 ↔ provider id」的对应改由下面的面板交叉校验与
  * 「刷的是自己的 credentialRef」断言反向验证。
+ *
+ * ⚠️ 只收**一对一具名字段**的 provider。`keyed` Map 里的 provider 见
+ * `KEYED_PROVIDER_IDS`（多个 provider 共用一个字段，放进本表会破坏下面的
+ * 「字段不重复」断言）。
  */
 const RPC_SERVICE_FIELD: Record<string, keyof JetHubRpcServices> = {
   codearts: 'codearts',
@@ -55,7 +65,6 @@ const RPC_SERVICE_FIELD: Record<string, keyof JetHubRpcServices> = {
   cline: 'cline',
   loomy: 'loomy',
   raccoon: 'raccoon',
-  byok: 'byok',
 }
 
 /** 从客户端源码派生 provider id 集合（与面板列表同一真相源）。 */
@@ -68,6 +77,17 @@ function panelProviderIds(): string[] {
   }
   return ids
 }
+
+/**
+ * 「粘贴 Key」族的 provider id（共用 `JetHubRpcServices.keyed` 这一张 Map）。
+ *
+ * ⚠️ 这份名单的真相源在 `src/keyed-product.ts` 的 `ALL_KEYED_PRODUCTS`。
+ * 这里手抄是为了让本不变量**不依赖服务端实现** —— 若从服务端表派生，
+ * 服务端漏掉一个平台时测试会跟着漏，这条断言就形同虚设。
+ * 两者的一致性由 `plugin.spec.ts` 的面板等集断言与
+ * `scripts/lint.mjs` 的 `provider-panel-parity` 双向守住。
+ */
+const KEYED_PROVIDER_IDS: readonly string[] = ['commandcode', 'opencode']
 
 /** 构造只记录调用的服务替身。 */
 function makeServiceStub(name: string, calls: RefreshCall[]) {
@@ -137,10 +157,14 @@ async function callRefresh(
     cline: makeServiceStub('cline', calls) as never,
     loomy: makeServiceStub('loomy', calls) as never,
     raccoon: makeServiceStub('raccoon', calls) as never,
-    // BYOK 没有 refresh 端点：这个替身的 `refreshAccountCredential` 语义是
-    // **有效性探测**（打一次 `GET /models`），但对外仍是同一个入口 ——
-    // 故它同样必须出现在这张表里，否则「刷新」按钮会抛 `Unknown provider: byok`。
-    byok: makeServiceStub('byok', calls) as never,
+    // 「粘贴 Key」族（commandcode / opencode）：它们**没有** refresh 端点，
+    // 这个替身的 `refreshAccountCredential` 语义是**有效性探测**（打一次平台
+    // chat 端点），但对外仍是同一个入口 —— 故它们同样必须出现在这张 Map 里，
+    // 否则「刷新」按钮会抛 `Unknown provider: commandcode`。
+    //
+    // ⚠️ 用 Map 而不是具名字段：本族会继续增加平台，具名字段会让每加一个平台
+    // 都要改 `JetHubRpcServices` 接口（历史上「漏改一处就出空壳面板」的成因）。
+    keyed: new Map(KEYED_PROVIDER_IDS.map(id => [id, makeServiceStub(id, calls) as never])),
   })
   const response = await handler!(new Request('http://127.0.0.1/api/jet-hub', {
     method: 'POST',
@@ -195,5 +219,15 @@ describe('account.refresh 分派不变量（每个面板 provider 都必须可�
     }
     const fields = Object.values(RPC_SERVICE_FIELD)
     expect(new Set(fields).size, 'RPC_SERVICE_FIELD 里有重复的具名字段').toBe(fields.length)
+  })
+
+  it('「粘贴 Key」族的 provider 都在面板里（否则空壳面板）', () => {
+    // 反向断言：本族共用一个 Map 字段，故上面的「逐字段对面板」循环覆盖不到它们。
+    // 漏了这条的话，服务端加了 `opencode` 而客户端面板没加，用户就完全看不到它，
+    // 而所有既有用例仍然是绿的。
+    const ids = panelProviderIds()
+    for (const provider of KEYED_PROVIDER_IDS) {
+      expect(ids, `「粘贴 Key」族的 ${provider} 在客户端面板列表里找不到`).toContain(provider)
+    }
   })
 })

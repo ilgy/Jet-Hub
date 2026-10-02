@@ -32,10 +32,10 @@ const STYLES = `
 .dim-jh-providerIcon.trae { background: white; }
 /* Raccoon Work（商汤）：官方图标是深蓝底白色面具，白底容器中显示清晰。 */
 .dim-jh-providerIcon.raccoon { background: white; }
-/* BYOK（自备 Key）：图标是灰底白钥匙的中性图形，白底容器保持与其他图标一致的圆角观感。 */
-.dim-jh-providerIcon.byok { background: white; }
+/* 「粘贴 Key」族：图标是中性深灰底 + 白色符号，白底容器保持与其他图标一致的圆角观感。 */
+.dim-jh-providerIcon.keyed { background: white; }
 
-/* BYOK 的「粘贴 API Key」表单（新建账号弹窗内联，不另开浏览器窗口）。 */
+/* 「粘贴 API Key」表单（新建账号弹窗内联，不另开浏览器窗口）。 */
 .dim-jh-keyForm { display: grid; gap: 10px; margin-top: 4px; }
 .dim-jh-keyForm label { display: grid; gap: 4px; font-size: 12px; color: var(--dsw-alias-label-secondary, #555); }
 .dim-jh-keyForm select,

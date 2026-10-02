@@ -9,7 +9,7 @@ import { registerTraeLlm } from './trae-adapter.js'
 import { registerClineLlm } from './cline-adapter.js'
 import { registerLoomyLlm, parseLoomyRemoteModels } from './loomy-adapter.js'
 import { registerRaccoonLlm } from './raccoon-adapter.js'
-import { registerByokLlm } from './byok-adapter.js'
+import { registerKeyedLlm } from './keyed-adapter.js'
 import { CODEARTS_CREDENTIAL_REF, CodeArtsAuth } from './service.js'
 import { BUDDY_CREDENTIAL_REF, BuddyAuth, createPoolRefresh } from './buddy-auth.js'
 import { LobsteraiAuth } from './lobsterai-auth.js'
@@ -18,11 +18,11 @@ import { TraeAuth } from './trae-auth.js'
 import { ClineAuth } from './cline-auth.js'
 import { LoomyAuth } from './loomy-auth.js'
 import { RaccoonAuth } from './raccoon-auth.js'
-import { ByokAuth } from './byok-auth.js'
+import { KeyedAuth } from './keyed-auth.js'
 import { LOOMY } from './loomy-product.js'
 import { LoomyBalanceSelector } from './loomy-balance-selector.js'
 import { RACCOON } from './raccoon-product.js'
-import { BYOK } from './byok-product.js'
+import { ALL_KEYED_PRODUCTS } from './keyed-product.js'
 import { AccountPool } from './account-pool.js'
 import { hasLegacyNamespaceRegistration, settingsOf, suppressAutoSettingsPage } from './settings-compat.js'
 import { broadcastCatalogChanged, buildRaccoonNickname, registerJetHubRpc } from './jet-hub-rpc.js'
@@ -38,8 +38,8 @@ import type { TraeCredential } from './trae.js'
 import type { ClineCredential } from './cline.js'
 import type { LoomyCredential } from './loomy.js'
 import type { RaccoonCredential } from './raccoon.js'
-import type { ByokCredential } from './byok.js'
-import { parseByokCredential } from './byok.js'
+import type { KeyedCredential } from './keyed.js'
+import { parseKeyedCredential } from './keyed.js'
 
 export const name = 'codearts-auth'
 // `connection` 刻意不列入静态 inject：它只由 Web bundle（dsh-client-connection）
@@ -157,7 +157,7 @@ export function apply(ctx: Context): void {
     'llm-buddy', 'llm-buddy-intl', 'llm-workbuddy-cn', 'llm-workbuddy',
     'llm-codearts', 'llm-lobsterai',
     'llm-qoder', 'llm-qoder-cn', 'llm-trae', 'llm-trae-intl',
-    'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-byok',
+    'llm-cline', 'llm-loomy', 'llm-raccoon', 'llm-commandcode', 'llm-opencode',
   )
   const service = new CodeArtsAuth(ctx)
   const pool = new AccountPool(ctx)
@@ -760,75 +760,83 @@ export function apply(ctx: Context): void {
     ctx.logger.warn(`[jet-hub] 修正 Raccoon 账号显示名失败：${String(error)}`)
   })
 
-  // ===== BYOK（Bring Your Own Key，用户自备 API Key）=====
-  // 第十四个 provider，也是**唯一没有登录流程**的一个：凭据由用户在前端弹窗
-  // 里粘贴（`login.submitKey`），插件只负责 `GET /models` 校验后持久化。
+  // ===== 「粘贴 API Key」族（commandcode / opencode）=====
+  // 这两个 provider 与其余 12 个**形态完全不同**：凭据由用户在前端弹窗里
+  // 粘贴（`login.submitKey`），插件负责校验后持久化。
   //
-  // ⚠️ 与其余 13 个 provider 的三点本质差异（改动前务必理解，否则会写出
-  // 看似合理但永远不生效的代码）：
+  // ⚠️ 三点本质差异（改动前务必理解，否则会写出看似合理但永远不生效的代码）：
   //
   // 1. **没有 `startLogin()`**。`account.create` 对它只建占位条目并立即返回
   //    `loginMode: 'key'`，一个网络请求都不发（见 `src/rpc/account.ts`）。
-  // 2. **没有续期**。Key 是手工粘贴的，第三方平台不提供「用 Key 换新 Key」
+  // 2. **没有续期**。Key 是手工粘贴的，两个平台都不提供「用 Key 换新 Key」
   //    的端点 ⇒ `refreshable` 恒 false，`refreshAll()` 是空操作（但保留，
   //    否则 `refreshAllCredentials()` 得为它加特例分支）。
-  // 3. **没有签到、没有余额查询**。能力表登记 `{ balance: false, dailyCheckin: false }`
-  //    —— 用户自带 Key 的额度由**对方平台**决定，本插件无从查询，也不该编造。
-  //    这也是它与其余 provider「送积分 + 一键签到」定位的差别：BYOK 的价值
-  //    是把一批原本接不进来的 OpenAI 兼容平台接进来（用户裁定：放宽
-  //    「扫码/跳转登录」这一条，新增「粘贴 Key」凭证形态）。
+  // 3. **没有签到、没有余额查询**。能力表登记
+  //    `{ balance: false, dailyCheckin: false }` —— 用户自带 Key 的额度由
+  //    **对方平台**决定，本插件无从查询，也不该编造。
   //
-  // 服务名由 `ByokAuth` 派生，注册为 `ctx.byokAuth`。
-  const byok = new ByokAuth(ctx)
-  const byokAdapter = registerByokLlm(ctx, {
-    credentialRef: credentialRef(BYOK.defaultCredentialRef),
-    resolveCredential: async () => {
-      // 与其余 provider 同款：只从自己的账号池取号，回退到自己的单凭据 ref。
-      // provider 实参用 `BYOK.id` 而非字面量 —— 写死字面量在改名场景下会
-      // 静默查不到账号（本插件在 workbuddy 上踩过同类坑）。
-      const available = await pool.getAvailableAccount(BYOK.id, '')
-      // `getAvailableAccount` 的凭据类型是 `CodeArtsCredential | BuddyCredential`
-      // 联合（历史遗留），与 `ByokCredential` 无充分重叠，故经 `unknown` 转换。
-      // 运行时安全性由 provider 过滤保证：查询用 `BYOK.id`，取到的必是 byok 凭据。
-      if (available) return available.credential as unknown as ByokCredential
-      const resolved = await ctx.credentials.resolve(credentialRef(BYOK.defaultCredentialRef))
-      if (!resolved) return undefined
-      return parseByokCredential(resolved.value)
-    },
-    // 按账号解析：BYOK 的每个账号是**一个独立的平台 + Key**（可能同时贴了
-    // 智谱和百炼），故模型目录必须逐账号聚合，选号也要按「该账号支持该模型」亲和。
-    resolveCredentialForAccount: async (accountId) => {
-      const parsed = await pool.resolveCredentialForAccount(accountId)
-      if (parsed === undefined) return undefined
-      // `resolveCredentialForAccount` 的返回类型是历史遗留的联合类型，
-      // 与 `ByokCredential` 无充分重叠，故经 `unknown` 转换。
-      // 运行时安全性由 provider 过滤保证：这里的 accountId 必属 byok。
-      return parsed as unknown as ByokCredential
-    },
-    listAccountEntries: async () =>
-      pool.listAccountsByProvider(BYOK.id).map(entry => ({ id: entry.id, credentialRef: entry.credentialRef })),
-    refresh: async () => {
-      // ⚠️ BYOK 无续期端点：这里的 `refresh` 语义是「探测 Key 是否仍有效」
-      // （与 Loomy 同型）。探测的是**解析凭据时所用的那一个**账号，而不是
-      // 默认单凭据 ref —— 否则探的是别的 Key，用户会看到「刚贴好却一直认证失败」。
-      const available = await pool.getAvailableAccount(BYOK.id, '')
-      if (available) await byok.refreshAccountCredential(available.entry.credentialRef)
-    },
-    // ⚠️ 不传 `readImage`：`GET /models` 不含多模态声明，各平台字段名互不
-    // 相同（有的在 /models、有的只在文档里），无法可靠判定 ⇒ 按不支持的
-    // 负能力处理（播报 text-only，遇到图片明确报错），而不是猜。
-    accountPool: pool,
-    // 目录/凭据告警出口。适配器拿不到 `ctx`，且 `src/` 的 `console.*` 是
-    // 只可下调的棘轮基线，故由这里把宿主的 logger 绑进去。
-    warn: (message: string) => ctx.logger.warn(message),
-    // ⚠️ 目录内容变化（平台上新模型、用户新增/删除 BYOK 账号）时必须广播
-    // `llm/adapters-updated`：客户端的 `ModelCatalogDirectory` 在
-    // `status === 'ready'` 时**短路返回缓存**，只在宿主事件上 refresh。
-    // 少这一句的话，服务端内存里的目录已经是最新的，用户界面却仍要重启
-    // DSH 才看得到 —— 与「关闭模型不生效」是同一处坑。
-    // 适配器只在模型 id 集合**真的变了**时才回调，故不会造成事件风暴。
-    onCatalogChanged: () => broadcastCatalogChanged(ctx),
-  })
+  // ⚠️ **Key 校验必须打 chat 端点，不能用 `GET /models`**：实测两个平台的
+  // 目录端点都不鉴权（无 Key 同样返回 200 + 完整模型列表），拿它当校验会让
+  // 任意字符串都被判「有效」。详见 `src/keyed-auth.ts` 的文件头注释。
+  //
+  // 服务名由 `KeyedAuth` 派生，注册为 `ctx.commandcodeAuth` / `ctx.opencodeAuth`。
+  const keyedServices = new Map<string, KeyedAuth>()
+  const keyedAdapters = new Map<string, ReturnType<typeof registerKeyedLlm>>()
+  for (const product of ALL_KEYED_PRODUCTS) {
+    const productId = product.id
+    const auth = new KeyedAuth(ctx, { product })
+    keyedServices.set(productId, auth)
+    const adapter = registerKeyedLlm(ctx, {
+      product,
+      credentialRef: credentialRef(product.defaultCredentialRef),
+      resolveCredential: async () => {
+        // 与其余 provider 同款：只从自己的账号池取号，回退到自己的单凭据 ref。
+        // provider 实参用 `product.id` 而非字面量 —— 写死字面量在改名场景下会
+        // 静默查不到账号（本插件在 workbuddy 上踩过同类坑）。
+        const available = await pool.getAvailableAccount(productId, '')
+        // `getAvailableAccount` 的凭据类型是 `CodeArtsCredential | BuddyCredential`
+        // 联合（历史遗留），与 `KeyedCredential` 无充分重叠，故经 `unknown` 转换。
+        // 运行时安全性由 provider 过滤保证：查询用 `productId`，取到的必是本族凭据。
+        if (available) return available.credential as unknown as KeyedCredential
+        const resolved = await ctx.credentials.resolve(credentialRef(product.defaultCredentialRef))
+        if (!resolved) return undefined
+        return parseKeyedCredential(resolved.value)
+      },
+      // 按账号解析：同一产品下用户可以贴多个 Key（各自的权益不同），
+      // 故模型目录必须逐账号聚合，选号也要按「该账号支持该模型」亲和。
+      resolveCredentialForAccount: async (accountId) => {
+        const parsed = await pool.resolveCredentialForAccount(accountId)
+        if (parsed === undefined) return undefined
+        // `resolveCredentialForAccount` 的返回类型是历史遗留的联合类型，
+        // 与 `KeyedCredential` 无充分重叠，故经 `unknown` 转换。
+        // 运行时安全性由 provider 过滤保证：这里的 accountId 必属本产品。
+        return parsed as unknown as KeyedCredential
+      },
+      listAccountEntries: async () =>
+        pool.listAccountsByProvider(productId).map(entry => ({ id: entry.id, credentialRef: entry.credentialRef })),
+      refresh: async () => {
+        // ⚠️ 本族无续期端点：这里的 `refresh` 语义是「探测 Key 是否仍有效」
+        // （与 Loomy 同型）。探测的是**解析凭据时所用的那一个**账号，而不是
+        // 默认单凭据 ref —— 否则探的是别的 Key，用户会看到「刚贴好却一直认证失败」。
+        const available = await pool.getAvailableAccount(productId, '')
+        if (available) await auth.refreshAccountCredential(available.entry.credentialRef)
+      },
+      // ⚠️ 不传 `readImage`：两个平台的 `/models` 都不含多模态声明，无法可靠
+      // 判定 ⇒ 按不支持的负能力处理（播报 text-only，遇到图片明确报错），而不是猜。
+      accountPool: pool,
+      // 目录/凭据告警出口。适配器拿不到 `ctx`，且 `src/` 的 `console.*` 是
+      // 只可下调的棘轮基线，故由这里把宿主的 logger 绑进去。
+      warn: (message: string) => ctx.logger.warn(message),
+      // ⚠️ 目录内容变化（平台上新模型、用户新增/删除账号）时必须广播
+      // `llm/adapters-updated`：客户端的 `ModelCatalogDirectory` 在
+      // `status === 'ready'` 时**短路返回缓存**，只在宿主事件上 refresh。
+      // 少这一句的话，服务端内存里的目录已经是最新的，用户界面却仍要重启
+      // DSH 才看得到 —— 与「关闭模型不生效」是同一处坑。
+      // 适配器只在模型 id 集合**真的变了**时才回调，故不会造成事件风暴。
+      onCatalogChanged: () => broadcastCatalogChanged(ctx),
+    })
+    keyedAdapters.set(productId, adapter)
+  }
 
   // ===== 多账号静默续期调度 =====
   const REFRESH_INTERVAL_MS = 30 * 60 * 1000 // 每 30 分钟检查一次
@@ -876,9 +884,9 @@ export function apply(ctx: Context): void {
     await raccoon.refreshAll(pool)
     } catch { /* 静默 */ }
     try {
-      // ⚠️ BYOK 恒不可续期（Key 由用户手工粘贴），这里是**空操作**。
-      // 保留调用只为与其余 provider 形态一致 —— 否则这里得为它加特例分支。
-      await byok.refreshAll(pool)
+      // ⚠️ 本族恒不可续期（Key 由用户手工粘贴），这里是**空操作**。
+      // 保留调用只为与其余 provider 形态一致 —— 否则这里得为它们加特例分支。
+      for (const auth of keyedServices.values()) await auth.refreshAll(pool)
     } catch { /* 静默 */ }
   }
 
@@ -970,9 +978,9 @@ export function apply(ctx: Context): void {
     cline: clineAdapter,
     loomy: loomyAdapter,
     raccoon: raccoonAdapter,
-    // BYOK 的适配器实例：设置页「模型列表」要用它的 `listAllModels()`
-    // （不受黑名单影响的全量目录）。BYOK 的目录是**所有账号模型的并集**。
-    byok: byokAdapter,
+    // 「粘贴 Key」族的适配器实例：设置页「模型列表」要用它们的 `listAllModels()`
+    // （不受黑名单影响的全量目录）。每个产品的目录是**其全部账号模型的并集**。
+    ...Object.fromEntries(keyedAdapters),
   }
 
   // ⚠️ 具名对象传参：少接 / 接错字段是**编译错误**。
@@ -993,7 +1001,7 @@ export function apply(ctx: Context): void {
     cline,
     loomy,
     raccoon,
-    byok,
+    keyed: keyedServices,
     modelAdapters,
   })
   ctx.provide('accountPool', pool)

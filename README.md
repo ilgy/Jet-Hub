@@ -29,18 +29,17 @@
   支持微信扫码登录、积分余额、每日额度签到与新手任务 10000 积分。
 - **raccoon（商汤小浣熊 Raccoon Work）** — 见 [Raccoon provider](#raccoon-provider)；
   支持扫码/短信登录、6 个商汤日日新模型、积分与一次性登录奖励。
-- **byok（自带 API Key / Bring Your Own Key）** — 见
-  [BYOK provider](#byok-provider自带-api-key)；**唯一没有登录流程的渠道**：
-  在面板里选一个预设平台（智谱 GLM / 阿里百炼 / 火山方舟 / 百度千帆 /
-  SiliconFlow / OpenRouter / Groq / Ollama 等 **26 个**）并粘贴你自己的 API Key，
-  插件会先请求该平台的 `GET /models` 校验，通过后才保存。
+- **commandcode（Command Code）** / **opencode（OpenCode Zen）** — 见
+  [粘贴 Key 渠道](#粘贴-key-渠道commandcode--opencode)；**没有登录流程**：
+  在对应面板里粘贴你自己的 API Key，插件会先向该平台的**对话端点**发一次最小请求
+  （`max_tokens: 1`）校验，通过后才保存。
 
-> **国内版与国际版各占一个 provider**（共 14 个）。两侧端点与登录态
+> **国内版与国际版各占一个 provider**（共 15 个）。两侧端点与登录态
 > **互不相通**，因此凭据也各自独立保存，绝不串用 —— 在对应面板登录哪一侧的账号，
 > 就只走那一侧的端点。
 >
-> ⚠️ `byok` 是唯一的例外：它不是一个厂商，而是「**你自己有 Key**」这一类通道，
-> 额度、计费与模型池完全由你所接的那个平台决定，插件只负责转发。
+> ⚠️ `commandcode` / `opencode` 是例外：它们不是「某家厂商的官方客户端」，
+> 而是「**你自己有 Key**」这一类渠道，额度与计费完全由平台决定，插件只负责转发。
 
 `codearts` 面板同样支持**积分账户检测、积分余额与「一键领取积分」**
 （华为云「每日签到得积分」活动，走 `SDK-HMAC-SHA256` 签名）——
@@ -98,7 +97,49 @@
 
 > ⚠️ 本更新日志仅记录版本功能变更，**不构成任何可用性、兼容性或持续维护的承诺**。使用前请务必阅读上方的 [免责声明](#-免责声明)：项目按 "AS IS" 提供，接口可能随上游变更随时失效，账号风险与合规责任由使用者自行承担。
 
-### v0.4.5 (最新发布)
+### v0.5.0 (最新发布)
+
+- 🔄 **渠道调整：移除 BYOK 通道，新增 `commandcode` 与 `opencode` 两个「粘贴 API Key」渠道。**
+  BYOK 那种「一个 provider 里挂 26 个平台」的形态被收敛掉，改为**一个渠道一个 provider**：
+  - **`commandcode`（Command Code）** —— 端点 `https://api.commandcode.ai/provider/v1`，
+    实测 85 个模型（支持 `/chat/completions` 的 75 个），控制台 <https://commandcode.ai/keys>。
+  - **`opencode`（OpenCode Zen）** —— 端点 `https://opencode.ai/zen/v1`，实测 85 个模型，
+    其中 **12 个带 `-free` 后缀**的免费档位；控制台 <https://opencode.ai/auth>。
+- 🔒 **⚠️ Key 校验改为打「对话端点」，不再用 `GET /models`**：实测这两个平台的
+  `/models` **完全不鉴权**（**不带 Key 也返回 200 + 完整模型列表**）。若继续拿它当校验，
+  任何字符串都会被判「有效」，用户会看到一个登录成功的账号、然后每一轮对话都 401。
+  现在改为发一次 `POST /chat/completions`（`max_tokens: 1`）：
+  - 探测模型一律取**免费档位**（`inclusionai/ling-3.1-flash:free` / `nemotron-3.5-lightning-free`）
+    —— 每次粘贴 Key 都会跑一次校验，用计费模型会让用户**为了配置插件而付钱**。
+  - ⚠️ opencode 的判据必须**连报文一起判**：`AuthError`（Key 无效）与 `ModelError`
+    （模型不该走这条协议）**都是 401**，只看状态码会让用户反复重粘一个完全正确的 Key。
+  - `commandcode` 的 **403 是「账号无权限」**（不是 Key 失效），同样不判无效。
+- 🆓 **「免费」标记只认模型 id 的名字后缀（`-free` / `:free` / `_free`）**。
+  ⚠️ **绝不把「实测能调通」标成免费**：那是**单个 Key 的权益**，不是平台公开事实 ——
+  实测 commandcode 这个 Key 有 55 个模型能调通，其中 **52 个不带 `free` 后缀**
+  （deepseek / Kimi / GLM / Qwen 等），换一个账号很可能 403。把它们标成免费会让
+  别的用户在计费模型上毫无防备。**无标记的语义是「未知」，不是「收费」。**
+- 🚫 **不能用 `/chat/completions` 调的模型从目录里下架**（列出来却调不通比不列更糟）：
+  - `commandcode` 下架 **10 个 claude**（`claude-sonnet-5-5` / `claude-opus-5` …）——
+    它们只能走 `/provider/v1/messages`，用 chat 调会返回
+    `400 Model "claude-sonnet-5-5" must be called via /provider/v1/messages`。
+  - `opencode` 下架 **`jev-1.13` / `jev-1.13-free`** —— 它们走 `/zen/v1/systemone`
+    （另一套请求/响应形状）。
+- 💬 **表单与提示同步更新**：不再显示「选平台 + 自定义 base url」下拉（每个渠道只有一个
+  固定端点，端点**只认服务端产品表**，前端传值一律忽略）；提示文案改为如实说明
+  「校验打的是对话端点」。
+- 🔁 **目录自动刷新对这两个渠道同样生效**（TTL 5 分钟 + 账号指纹变更立即重拉 +
+  集合真变才广播）—— 与其余 13 个 provider 的「首个成功即永久缓存」有意不同。
+  ⚠️ 比较目录时**必须连 `free` 标记一起比**：平台把模型从收费改成免费时 id 一字未变，
+  只比 id 就永远刷不出「（免费）」角标。
+- 🧪 **门禁与测试**：新增 4 个测试文件（`keyed.spec` 27 例、`keyed-auth.spec` 27 例、
+  `keyed-adapter.spec` 21 例、`keyed-rpc-dispatch.spec` 30 例），替换掉 3 个 BYOK 用例文件；
+  全量 **2728 个单元测试通过**；provider 三方等集推进到 **15/15/15**。
+- ♻️ **`account.refresh` 不再为本族逐 id 写 `case`**：改为在 `default:` 里查
+  `keyed` Map —— 以后再加平台不必动那个 switch（逐个 `case` 漏写正是历史缺陷的成因：
+  `buddy-intl` / `workbuddy-cn` / `byok` 都因此让「刷新」按钮坏过）。
+
+### v0.4.5
 
 - 🆓 **智谱免费模型从 3 个扩到 8 个**。上版只列表里已验证的 3 个，用户接着追问
   「那现在哪些是免费的？可以用的？」，于是把候选集**扩大重扫**了一遍，实测
@@ -181,7 +222,9 @@
     账号昵称仅显示尾 4 位。
   - 为什么是「粘贴 Key」而不是扫码登录：按「送积分 + 有可编程 API + 可扫码/跳转登录 + 有一键签到」
     四条硬标准核了 40 多个平台，**同时满足四条的新平台为零** —— 卡点几乎全在登录链
-    （额度与兼容端点都有，但 Key 必须在厂商控制台手工创建）。详见 [BYOK 章节](#byok-provider自带-api-key)。
+    （额度与兼容端点都有，但 Key 必须在厂商控制台手工创建）。该通道在 v0.5.0 被
+    替换为按平台拆分的 `commandcode` / `opencode`，见
+    [粘贴 Key 渠道](#粘贴-key-渠道commandcode--opencode)。
 - 🐛 **修复 `account.refresh` 缺 BYOK 分支**（由两个独立测试同时抓到）：
   漏了该分支会落 `default` 抛 `Unknown provider: byok`，表现为账号卡片的「刷新」按钮点一下就报错。
   BYOK 的续期语义与其余 provider 不同：服务端无 refresh 端点，只能做有效性探测，
@@ -359,6 +402,8 @@
 | **CodeBuddy (国内版)** | 腾讯云 CodeBuddy | 微信扫码 / 手机验证码 / 腾讯 OAuth | `deepseek-v3`、`deepseek-r1`、`glm-5.3`、`glm-4-plus`、`kimi-k3`、`hunyuan-standard` 等 14 款精选模型 |
 | **CodeBuddy (国际版)** | CodeBuddy AI Global | 国际版 GitHub / Google / Email 登录 | 国际版全系模型支持 |
 | **WorkBuddy (国内/国际)**| 腾讯 WorkBuddy 生态 | 微信扫码 / 企业微信 / 国际版 OAuth | `GPT-6-Astra`、`GPT-5.6-Sol`、`GPT-5.6-Terra`、`GPT-5.5`、`Gemini-3.5-Flash`、`GLM-5.3` 等 20 款生态模型 |
+| **Command Code** | `commandcode.ai` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 75 个支持 `/chat/completions`（`deepseek-v4-pro`、`Kimi-K3`、`GLM-5.3`、`Qwen3.8-Max` 等） |
+| **OpenCode Zen** | `opencode.ai/zen` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 12 个带 `-free` 后缀的免费档位 |
 
 ---
 
@@ -2055,134 +2100,173 @@ pnpm test:e2e:raccoon-tools  # ⚠️ 发推理：验证 **tools 被端点接受
 
 ---
 
-## BYOK provider（自带 API Key）
+## 粘贴 Key 渠道（Command Code / OpenCode Zen）
 
-`byok` 是本插件第 **14** 个 provider，也是**唯一没有登录流程**的一个：
-面板里选一个预设平台，把你自己的 API Key 粘进去即可。
+`commandcode` 与 `opencode` 是本插件第 **14**、**15** 个 provider，也是
+**没有登录流程**的两个：在对应面板里把你自己的 API Key 粘进去即可。
 
 ### 与其余 13 个 provider 的本质差异
 
-| | 其余 13 个 | `byok` |
+| | 其余 13 个 | `commandcode` / `opencode` |
 |---|---|---|
 | 凭据来源 | 浏览器登录 / 设备码 / 扫码，插件拿到 token | **用户手工粘贴**的 API Key |
 | 登录流程 | 两步式（返回 `loginUrl` → 弹窗 → 轮询 `login.poll`） | **无**。`account.create` 只建占位条目，返回 `loginMode:'key'` |
+| 端点 | 由产品常量决定 | 由产品常量决定（**每个 provider 一个固定端点**，前端改不了） |
 | 续期 | 多数有 refresh 端点 | **恒不可续期**（`refreshable:false`）。刷新按钮只做**有效性探测** |
-| 模型池 | 由厂商端点决定 | 由**你接的那个平台**决定，逐账号聚合 |
-| 额度 / 积分 | 部分支持签到领取 | **两项能力都不登记**（插件不知道该平台的计费口径） |
+| 模型池 | 由厂商端点决定 | 由平台端点决定，逐账号取**并集** |
+| 额度 / 积分 | 部分支持签到领取 | **两项能力都不登记**（平台没有查询端点） |
 | 图片输入 | 逐 provider 判定 | **明确不支持**（`/models` 不含多模态声明 ⇒ 按负能力处理） |
 
-### 两步式校验（先验后写）
+### ⚠️ 校验打的是「对话端点」，不是 `GET /models`
+
+这是本族最反直觉、也最容易写错的一处。实测（2026-10）：
+
+| 平台 | `GET {base}/models` 无 Key | 带 bogus Key | 结论 |
+|---|---|---|---|
+| `api.commandcode.ai/provider/v1` | **200**（85 个模型） | **200** | 目录端点**不鉴权** |
+| `opencode.ai/zen/v1` | **200**（85 个模型） | **200** | 目录端点**不鉴权** |
+
+⇒ 拿 `/models` 当校验，**任何字符串都会被判「有效」**。用户会看到一个登录成功的
+账号，然后每一轮对话都 401 —— 而报错文案与真实原因完全无关。
+
+现在改为发一次 `POST /chat/completions`：
 
 ```
-用户选平台 + 粘贴 Key
+用户粘贴 Key
   → login.submitKey
-      → GET {base_url}/models   ← 这一步既是「拉模型目录」也是「验 Key」
+      → keyedApiKeyLooksMalformed（结构预检，不发请求）
+      → POST {base_url}/chat/completions   ← 探测：max_tokens:1, stream:false
       → 通过才写凭据；不通过不写，占位条目保留（用户可重试）
 ```
+
+⚠️ **探测模型必须是免费档位**（`inclusionai/ling-3.1-flash:free` /
+`nemotron-3.5-lightning-free`）：每次粘贴 Key 都会跑一次校验，用计费模型会让用户
+**为了配置插件而付钱**，且用户完全无从预期。
 
 ⚠️ **顺序不能反**。先写凭据再校验会留下「账号在、模型全空」的黑洞：
 模型目录门控的判据是「**凭据能否解析**」，所以一份打不通的凭据
 会让该账号**算作已登录** —— 于是既不显示模型，也不报任何错。
 
-⚠️ **校验判据是「2xx **且** 至少一个模型 id」**，不是「状态码 2xx」：
-有的平台对无效 Key 返回 200 + 空清单；也不能只判「有报文」——错误报文
-同样是合法 JSON。
+⚠️ **opencode 的判据必须连报文一起判**：
 
-### 平台清单由服务端下发
-
-`account.create` 在 `loginMode:'key'` 时一并返回 `platforms`（26 项：
-`{id, label, baseUrl, consoleUrl, note?}`）。前端**不复制**这份清单 —— 每个
-`baseUrl` 都经「候选路径 vs 随机路径」对照组实测校正过，抄一份必然漂移。
-清单**不含任何凭据**：它只是公开的平台元数据。
-
-⚠️ `baseUrl` 只在 `platform === 'custom'` 时采信前端传值。选 `zhipu`
-却传百炼的地址，服务端会按**表里的 zhipu 地址**发请求 —— 否则前端可以拿
-一个平台的展示名去配任意端点。
-
-### 预设平台（26 个）
-
-| 分组 | 平台 id |
-|---|---|
-| 国内大厂 | `zhipu`（智谱 GLM）/ `dashscope`（阿里百炼）/ `volces`（火山方舟）/ `qianfan`（百度千帆）/ `siliconflow`（硅基流动） |
-| 国内新锐 | `moonshot` / `deepseek` / `minimax` / `stepfun`（阶跃）/ `longcat`（美团龙猫）/ `modelbest`（面壁）/ `sensenova`（商汤） |
-| 海外聚合 | `openrouter` / `chutes` / `groq` / `cerebras` / `mistral` / `together` / `fireworks` / `nvidia` / `sambanova` / `novita` / `nebius` / `hyperbolic` |
-| 本地 / 其他 | `ollama`（`http://127.0.0.1:11434/v1`）/ `custom`（自己填 base url） |
-
-⚠️ `custom` 是唯一 `baseUrl` 为空串的条目，必须自己填；`byokBaseUrlLooksValid`
-只拦「没写协议头」，`http://127.0.0.1:11434/v1` 必须放行（本地 Ollama 是合法用途）。
-
-### 「免费」是怎么标出来的（以及为什么大多数时候标不出来）
-
-模型名后缀会出现「（免费）」，但**只在有确凿依据时**：
-
-| 依据 | 例子 | 判据 |
+| 报文 | 含义 | 该判「Key 无效」吗 |
 |---|---|---|
-| 平台自己报了价格 | OpenRouter（464 个里 21 个）、Novita（121 个里 7 个） | `pricing.prompt`/`completion`（或 `input/output_token_price_per_m`）**都存在且为 0** |
-| 平台表显式列出 | 智谱 8 个（`glm-4-flash` / `glm-4-flash-250414` / `glm-4.5-flash` / `glm-z1-flash` / `glm-4v-flash` / `glm-4.1v-thinking-flash` / `glm-4.6v-flash` / `glm-4.7-flash`） | 实测 `POST /chat/completions`（`max_tokens:1`）返回 2xx |
+| `{"error":{"type":"AuthError","message":"Invalid API key."}}` | Key 无效 | ✅ |
+| `{"error":{"type":"ModelError","message":"... not supported for format systemone"}}` | **模型不该走这条协议** | ❌ |
 
-⚠️ **没有后缀不等于收费，也不等于免费** —— 它的准确含义是**未知**。
-绝大多数平台的 `/models` 压根没有价格字段（实测智谱的每个条目只有
-`id` / `object` / `created` / `owned_by`），插件**不能**替它们编一个。
-免费与否由平台的计费政策与你的账号额度决定，请以平台官网为准。
+两者**都是 401**。只看状态码会把「模型选错了协议」误判成「Key 失效」，
+用户会一头雾水地反复重新粘贴一个完全正确的 Key。
 
-⚠️ **也不能按名字猜**。智谱这一族里，`glm-4.7-flash` 免费，但
-`glm-4.6-flash` 是 `403 无权访问`、`glm-4-flashx` / `glm-z1-flashx` /
-`glm-4.5-airx` 是 `429 余额不足`（即**计费**型号）、`glm-5-flash` 是
-`400 模型不存在`。只有实打过的 id 才敢列进平台表。
+⚠️ `commandcode` 侧另有第三种：**403 是「账号无权限」**（不是 Key 失效），
+同样不判无效。
 
-⚠️ **余额为 0 时，免费模型是唯一还能用的部分**（实测：智谱账号打
-`glm-4.5` ~ `glm-5.3` 全部 `429 余额不足`，而上面 8 个照样 200）。
-这也是智谱的免费模型被**硬编码进平台表**的原因 —— 它的 `/models` 不下发这些模型，
-只信接口的话列表里就只剩收费模型。
+### 端点只认服务端产品表
 
-⚠️ 插件**不做任何计费**：请求由宿主从**你的本机**直接发到你填的 `base_url`，
-`Authorization` 头就是你粘贴的那把 Key。插件不经手 Key、不代理请求、不上报用量，
-也**没有任何代扣能力**。预付费平台（智谱、百炼、火山…）余额耗尽即拒服务
-（`429`），不会产生欠费；后付费/绑卡平台（OpenAI Platform、Azure 等）的账单由
-你与该平台的协议决定，与插件无关。
+`login.submitKey` **完全不采信**前端传的 `platform` / `baseUrl`：端点一律取
+`keyedProductById(provider).baseUrl`。否则前端可以拿一个渠道的展示名去配任意地址。
+
+| provider | 端点 | 控制台（去哪儿拿 Key） |
+|---|---|---|
+| `commandcode` | `https://api.commandcode.ai/provider/v1` | <https://commandcode.ai/keys> |
+| `opencode` | `https://opencode.ai/zen/v1` | <https://opencode.ai/auth> |
+
+### 「免费」只认模型 id 的名字后缀
+
+| provider | 免费判据 | 例子 |
+|---|---|---|
+| `commandcode` | id 后缀 `-free` / `:free` | `poolside/laguna-s-2.1-free`、`inclusionai/ling-3.1-flash:free` |
+| `opencode` | id 后缀 `-free`（共 **12 个**） | `nemotron-3.5-lightning-free`、`space-bunny-free`、`longcat-2.5-preview-free`、`mimo-v2.6-flash-free`、`mimo-v2.5-free`、`ling-3.0-flash-fin-free`、`nemotron-3-ultra-free`、`deepseek-v4-flash-free` 等 |
+
+⚠️ **绝不能把「实测能调通」标成免费** —— 那是**单个 Key 的权益**，不是平台公开事实。
+实测用 commandcode 的一个 Key 逐个打 `POST /chat/completions`（`max_tokens:1`）：
+
+| 结果 | 数量 | 含义 |
+|---|---|---|
+| **200** | **55** | 这个 Key 有权限 |
+| **403** | 14 | 账号无权（`gpt-5.x` / `gpt-6.x` / `gemini-3.5-3.6-flash` 等） |
+| **400** | 16 | 10 个 claude 要走 `/messages`；`max_output_tokens` 参数问题；无可用 provider |
+
+那 55 个 200 里**只有 3 个带 `free` 后缀**，其余 52 个（deepseek / Kimi / GLM / Qwen …）
+**不带后缀**。换一个账号很可能 403 —— 把它们标成「免费」会让别的用户在计费模型上
+**毫无防备**。**无后缀的准确含义是「未知」，不是「收费」。**
+
+### 不能用 `/chat/completions` 调的模型会被下架
+
+列出来却调不通比不列更糟：用户点了模型、发出去、拿到 400，还会以为是自己 Key 的问题。
+
+| provider | 下架 | 实测原因 |
+|---|---|---|
+| `commandcode` | **10 个 claude**（`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-5`、`claude-haiku-4-5-20251001` 等） | 用 chat 调返回 `400 Model "claude-sonnet-5-5" must be called via /provider/v1/messages (Anthropic Messages shape).` |
+| `opencode` | **`jev-1.13` / `jev-1.13-free`** | 走 `/zen/v1/systemone`（另一套请求/响应形状） |
+
+`commandcode` 的 `/models` 会给每个模型下发 `supported_endpoints`：
+`/chat/completions` + `/responses` **66 个**、`/messages` **10 个**（全部是 claude）、
+只给 `/chat/completions` **9 个** —— 支持 chat 的共 **75 个**。
+
+### ⚠️ 不要试图伪装「官方客户端」
+
+`opencode` 的免费档位在**服务端**按「是否来自 OpenCode 客户端」判定。实测全部失败：
+
+| 尝试 | 结果 |
+|---|---|
+| 无 header | `403 FreeTierError` |
+| UA = `opencode/1.0.0` / `opencode-cli/0.5.0` / `OpenCode/1.0` / `Mozilla/5.0...` / `node` | 全部 `403 FreeTierError` |
+| `x-opencode-client` / `x-opencode-version` / `x-zen-client` / `origin` / `referer` | 全部 `403 FreeTierError` |
+
+⇒ **免费档位在插件内不可用**。带**有效 Key** 时不再走这条判定（鉴权先于档位），
+故本插件**只发** `Authorization: Bearer <你的 Key>` + `Accept`，
+不伪造任何厂商身份头 —— 伪造既无用，又多一处会过期的伪装。
+
+### 目录会自动刷新
+
+与其余 13 个 provider 的「首个成功即永久缓存」**有意不同**：
+
+- **TTL 5 分钟**内命中缓存；
+- **账号指纹**（`accountId@base_url` 集合）一变就**立即**重拉 —— 新贴一个 Key
+  不该等 5 分钟才看到它的模型；
+- 模型集合**真的变了**才广播 `llm/adapters-updated` 让客户端立刻刷新
+  （不是每次重拉都通知，否则每 5 分钟一轮无意义事件）。
+
+⚠️ 集合比较**必须连 `free` 标记一起比**：平台把模型从收费改成免费时 id 一字未变，
+只比 id 就永远刷不出「（免费）」角标。
+
+⚠️ 失败时**保留旧目录**（一次网络抖动不该让选择器里的模型全没了），并进入
+30 秒冷却 —— 只在「一次都没拉到且账号没变」时生效。
 
 ### 多账号与模型亲和
 
-每个 BYOK 账号是**一个独立的「平台 + Key」组合**（可以同时贴智谱和百炼）。
-适配器按账号聚合模型目录取**并集**，选号时按「该账号支持该模型」**亲和**：
-目标模型在某个账号的模型集里 → 优先用它；模型集未知（拉取失败）→ 也算候选；
-全不命中 → 退回池中第一个。
+同一渠道下可以贴多个 Key（各自的权益不同）。适配器按账号聚合模型目录取**并集**，
+选号时按「该账号支持该模型」**亲和**：目标模型在某个账号的模型集里 → 优先用它；
+模型集未知（拉取失败）→ 也算候选；全不命中 → 退回池中第一个，让上游报真实错误。
 
-⚠️ 某个账号目录拉取失败时**不缓存它的模型集**，也就**不做模型过滤**（保守放行），
-并且不影响其它账号的目录 —— 一个 Key 贴错不该清空整个面板。
-
-### 请求头极简
-
-只发 `Authorization: Bearer <key>` + `Accept`，**不叠加任何 `X-*`
-自定义头**（`byokHeaders`）。其余 provider 的身份头都是各自协议的必需特征，
-套到第三方平台上只会被拒。
+⚠️ **不做任何重排**：账号池的数组顺序**就是**你拖拽出来的优先级。
 
 ### 昵称与安全
 
-账号昵称是 `平台名 · <Key 尾 4 位>`（如 `智谱 GLM · a1b2`）。
+账号昵称是 `平台名 · <Key 尾 4 位>`（如 `Command Code · sui7`）。
 ⚠️ **绝不放 Key 前段** —— 设置页是用户会截图分享的地方。
 
-Key 的形态预检（`byokApiKeyLooksMalformed`）**只拦结构性错误**：空串、含换行、
-首尾带引号、含空格。**不做长度或前缀白名单** —— 各平台的 Key 格式并不统一，
-按 `sk-` 之类前缀判定会把合法 Key 挡在门外。
+Key 的形态预检（`keyedApiKeyLooksMalformed`）**只拦结构性错误**：空串、含换行、
+首尾带引号、含空格（最后一类覆盖「从终端复制时带上了 `export KEY=` 前缀」）。
+**不做长度或前缀白名单** —— 实测 Key 形态各异（`user_...` / `sk-...` / `oc_...` /
+纯 hex），按前缀判定会把合法 Key 挡在门外。
 
 ### 失败与换号
 
 - `429` / `402`，或响应文案命中额度标记（中英文共 13 个词）→ 视为限流，
   换下一个账号重试（最多 3 个）。
 - 但**限流徽章只记 `429` / `402`**（徽章含义是「受限」而不是「出过错」）。
-- ⚠️ 非限流的 4xx **不换号**，直接把远端明细报给用户 —— 换号重试只会
-  把「你的 Key 不对」变成「所有账号都不可用」。
-- ⚠️ `401` / `403` **不触发续期**（与其余 provider 的关键差异）：BYOK 的 Key
-  无法续期，重试是白跑一趟。
+- ⚠️ `401` 是 **Key 无效**，**不换号、也不记限流** —— 换号救不了错误的 Key，
+  记限流还会把一个正确的账号白白搁置一小时。
 
 ### 能力矩阵
 
 ```js
-byok: { balance: false, dailyCheckin: false }
+commandcode: { balance: false, dailyCheckin: false },
+opencode:    { balance: false, dailyCheckin: false }
 ```
 
-⚠️ 这里的 `false` **不是「还没实现」，而是能力边界**：额度由用户自己接的
-那个平台决定 —— 智谱看余额、硅基流动看余额、OpenRouter 看 credits、
-Groq 看速率窗口，字段与端点各不相同。插件既没有该平台的账号体系，
-也不知道其计费口径，故**如实登记负能力**，不发任何请求、不渲染相关 UI。
+⚠️ 这里的 `false` **不是「还没实现」，而是能力边界**：两家平台的额度由平台决定，
+且**都没有查询端点**（实测 `/usage`、`/credits`、`/balance` 全部 404）。
+插件既没有该平台的账号体系，也不知道其计费口径，故**如实登记负能力**，
+不发任何请求、不渲染相关 UI。
