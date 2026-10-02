@@ -267,9 +267,21 @@ describe('「粘贴 Key」族的校验判据（服务端源码级回归）', () 
     expect(entry).toMatch(/claude-sonnet-5-5/)
   })
 
-  it('⚠️ opencode 下架走 /systemone 的 jev-1.13（另一套请求形状）', () => {
+  it('⚠️ opencode 下架走非 chat 端点的模型（jev-1.13 / gpt-* / claude-* / gemini-*）', () => {
     const at = productSource.indexOf('export const OPENCODE: KeyedProduct')
-    const entry = productSource.slice(at, at + 2500)
-    expect(entry).toMatch(/excludeModels[\s\S]{0,200}jev-1\.13/)
+    const entry = productSource.slice(at, at + 6000)
+    expect(entry).toMatch(/excludeModels/)
+    // 四类非 chat 端点各取一个代表。
+    expect(entry).toMatch(/jev-1\.13/)
+    expect(entry).toMatch(/'gpt-5\.5'/)
+    expect(entry).toMatch(/claude-sonnet-5/)
+    expect(entry).toMatch(/gemini-3\.8-flash/)
+  })
+
+  it('⚠️ 官方文档声明免费但无 free 后缀的模型必须进白名单', () => {
+    // 这是「确保会显示 免费的模型」这条需求的直接守卫：只靠后缀会漏掉
+    // commandcode 的 stealth/space-bunny-alpha 与 opencode 的 big-pickle。
+    expect(productSource).toMatch(/documentedFreeModels[\s\S]{0,120}stealth\/space-bunny-alpha/)
+    expect(productSource).toMatch(/documentedFreeModels[\s\S]{0,120}big-pickle/)
   })
 })

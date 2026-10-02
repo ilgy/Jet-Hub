@@ -111,6 +111,8 @@ describe('loadKeyedModels', () => {
     expect(calls[0]!.url).toBe('https://api.commandcode.ai/provider/v1/models')
     expect(models.map(m => m.id)).toEqual(['a', 'b-free'])
     expect(models[1]!.free).toBe(true)
+    // ⚠️ 白名单**只补标记**，不会凭空追加目录里没有的 id。
+    expect(models.map(m => m.id)).not.toContain('stealth/space-bunny-alpha')
   })
 
   it('⚠️ 下架不能用 /chat/completions 调的模型，并给出 warning', async () => {
@@ -126,13 +128,35 @@ describe('loadKeyedModels', () => {
     expect(warnings.join('\n')).toMatch(/不接受 \/chat\/completions/)
   })
 
-  it('opencode 下架 jev-1.13（走 /systemone 的另一套形状）', async () => {
+  it('⚠️ 官方声明免费但无 free 后缀的模型在目录里时被标出来', async () => {
+    // `stealth/space-bunny-alpha` 官方定价页写明 free，但 id 不带后缀。
+    const { impl } = makeFetch(() => new Response(
+      JSON.stringify({ data: [{ id: 'stealth/space-bunny-alpha' }, { id: 'deepseek/deepseek-v4-pro' }] }),
+      { status: 200 },
+    ))
+    const { models } = await loadKeyedModels(COMMANDCODE, buildKeyedCredential({ apiKey: 'k', product: 'commandcode', baseUrl: COMMANDCODE.baseUrl }), impl)
+    expect(models.find(m => m.id === 'stealth/space-bunny-alpha')?.free).toBe(true)
+    expect(models.find(m => m.id === 'deepseek/deepseek-v4-pro')?.free).toBe(false)
+  })
+
+  it('opencode 下架非 chat 模型（jev-1.13 走 /systemone）', async () => {
     const { impl } = makeFetch(() => new Response(
       JSON.stringify({ data: [{ id: 'jev-1.13-free' }, { id: 'space-bunny-free' }] }),
       { status: 200 },
     ))
     const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: OPENCODE.baseUrl }), impl)
     expect(models.map(m => m.id)).toEqual(['space-bunny-free'])
+  })
+
+  it('⚠️ opencode 的 Big Pickle 免费但无后缀，在目录里时被标出来', async () => {
+    const { impl } = makeFetch(() => new Response(
+      JSON.stringify({ data: [{ id: 'big-pickle' }, { id: 'gpt-5.5' }] }),
+      { status: 200 },
+    ))
+    const { models } = await loadKeyedModels(OPENCODE, buildKeyedCredential({ apiKey: 'k', product: 'opencode', baseUrl: OPENCODE.baseUrl }), impl)
+    // `gpt-5.5` 走 /responses，被下架。
+    expect(models.map(m => m.id)).toEqual(['big-pickle'])
+    expect(models[0]!.free).toBe(true)
   })
 
   it('非 2xx 抛带状态码的错误', async () => {

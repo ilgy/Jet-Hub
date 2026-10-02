@@ -95,15 +95,45 @@ function keyedEntryEndpoints(item: unknown): readonly string[] {
 /**
  * 该模型 id 的**名字**是否表明它免费。
  *
- * ⚠️ 这是本族唯一可移植的免费信号，见 `src/keyed-product.ts` 的
- * `COMMANDCODE` 表头注释：两个平台的目录都**没有**任何价格字段，
- * 而「能调用成功」是**单个账号的权益**（同一个 id 在别的账号上会 403），
- * 把它写成全局标签会误导其他用户。
+ * ⚠️ 这只是**两个**免费信号之一，不能单独使用：实测两个平台都有
+ * 「官方文档明确免费、但 id 不带 free 后缀」的模型
+ * （commandcode 的 `stealth/space-bunny-alpha`、opencode 的 `big-pickle`）。
+ * 完整的判据见 {@link markKeyedFreeModels}。
  *
  * 覆盖 `-free` / `:free` / `_free` 三种写法（实测两个平台都在用）。
  */
 export function keyedModelIdLooksFree(modelId: string): boolean {
   return /[-_:]free$/i.test(modelId.trim())
+}
+
+/**
+ * 把「免费」标记补进目录条目（**后缀命中 或 官方文档白名单**）。
+ *
+ * ⚠️ 为什么需要白名单：官方文档/定价页有时会把免费模型的 id 取得
+ * **完全不带 free**（commandcode 的 `stealth/space-bunny-alpha`、
+ * opencode 的 `big-pickle`），只靠后缀会让用户看不到免费模型 ——
+ * 而这正是这两个渠道的主要价值。
+ *
+ * ⚠️ 白名单**只收官方文档写明的 id**，绝不收「实测能调通」——
+ * 后者是**单个 Key 的权益**（实测同一目录下大量模型在不同账号上 403），
+ * 写死成免费会让别的用户在计费模型上毫无防备。
+ *
+ * ⚠️ **只补标记，不追加目录里没有的 id**。这是与早期「平台表补免费模型」
+ * 做法的一处有意差别：那两个渠道的免费模型**都在 `/models` 里**
+ * （实测确认），凭文档凭空加一条会让用户选中一个平台根本没上架的模型、
+ * 发出去 404 —— 「补标记」是纠正，而「造条目」是编造。
+ * 于是白名单里的 id 若确实不在目录里，就**安静地不显示**。
+ *
+ * 已存在的条目**就地补标记**（不改变顺序）。
+ */
+export function markKeyedFreeModels(
+  models: readonly KeyedModelEntry[],
+  documentedFree: readonly string[] | undefined,
+): KeyedModelEntry[] {
+  if (documentedFree === undefined || documentedFree.length === 0) return [...models]
+  return models.map(entry => (
+    entry.free || !documentedFree.includes(entry.id) ? entry : { ...entry, free: true }
+  ))
 }
 
 /** 价格的「零」判据：数字 0 或字符串 `"0"` / `"0.0"` 等。 */

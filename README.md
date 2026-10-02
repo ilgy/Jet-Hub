@@ -114,17 +114,32 @@
   - ⚠️ opencode 的判据必须**连报文一起判**：`AuthError`（Key 无效）与 `ModelError`
     （模型不该走这条协议）**都是 401**，只看状态码会让用户反复重粘一个完全正确的 Key。
   - `commandcode` 的 **403 是「账号无权限」**（不是 Key 失效），同样不判无效。
-- 🆓 **「免费」标记只认模型 id 的名字后缀（`-free` / `:free` / `_free`）**。
-  ⚠️ **绝不把「实测能调通」标成免费**：那是**单个 Key 的权益**，不是平台公开事实 ——
-  实测 commandcode 这个 Key 有 55 个模型能调通，其中 **52 个不带 `free` 后缀**
-  （deepseek / Kimi / GLM / Qwen 等），换一个账号很可能 403。把它们标成免费会让
-  别的用户在计费模型上毫无防备。**无标记的语义是「未知」，不是「收费」。**
-- 🚫 **不能用 `/chat/completions` 调的模型从目录里下架**（列出来却调不通比不列更糟）：
+- 🆓 **「免费」标记有两个来源**：①模型 id 的名字后缀（`-free` / `:free` / `_free`）；
+  ②**平台官方文档/定价页白名单**。
+  ⚠️ **②不可省** —— 官方免费模型有不带后缀的：
+  - `commandcode` 的 **`stealth/space-bunny-alpha`**（定价页 `Free` 分组原文：
+    「is free. Requests on this model cost no credits…on every plan.」）；
+  - `opencode` 的 **`big-pickle`**（计价表 Input/Output/Cached Read 三列全标 `Free`）。
+  只靠后缀会**漏掉这两个真实的免费模型**，而「确保会显示 免费的模型」正是本渠道的目的。
+  ⚠️ 白名单只收官方文档白纸黑字的 id，且**只补标记、不追加目录里没有的 id**
+  （凭空加一条会让用户选中平台没上架的模型、发出去 404）。
+- 🔬 **顺带实测到一个更可靠的免费判据（仅 opencode 适用）**：opencode 的免费档位在
+  **鉴权之前**就分流 —— 不带 `Authorization` 头打 `/chat/completions` 时，
+  免费档位返回 `403 FreeTierError`（或直接 200），付费档位返回 `401 AuthError`。
+  对全部 **85 个**模型跑了一遍：**71× 401 / 8× 403 FreeTierError / 4× 500 / 1× 400 / 1× 200**，
+  非 401 的 14 个与「后缀 12 个 + 白名单 2 个」**完全吻合**，交叉验证了免费清单。
+  ⚠️ 该判据**只在 opencode 成立**：commandcode 匿名时对全部 85 个一律 `401`。
+- 🚫 **不能用 `/chat/completions` 调的模型全部从目录里下架**（列出来却调不通比不列更糟）：
   - `commandcode` 下架 **10 个 claude**（`claude-sonnet-5-5` / `claude-opus-5` …）——
     它们只能走 `/provider/v1/messages`，用 chat 调会返回
     `400 Model "claude-sonnet-5-5" must be called via /provider/v1/messages`。
-  - `opencode` 下架 **`jev-1.13` / `jev-1.13-free`** —— 它们走 `/zen/v1/systemone`
-    （另一套请求/响应形状）。
+  - `opencode` 下架 **58 个** —— 官方文档的端点列显示它们走 `/responses`（`gpt-*` /
+    `grok-*` / `muse-spark-*`）、`/messages`（`claude-*` / 部分 `qwen*`）、
+    `/models/gemini-*`、`/systemone`（`jev-1.13*`）。
+    其中 `muse-spark-1.3-contributor-free` 与 `muse-spark-1.2-contributor-free`
+    是**免费**模型但走 `/responses`，下架属能力限制。
+  ⚠️ 端点归属**只能靠官方文档的端点列**：opencode **鉴权先于路由**，
+  用 bogus Key 探测拿不到端点信息（连走 systemone 的 `jev-1.13-free` 也返回 `AuthError`）。
 - 💬 **表单与提示同步更新**：不再显示「选平台 + 自定义 base url」下拉（每个渠道只有一个
   固定端点，端点**只认服务端产品表**，前端传值一律忽略）；提示文案改为如实说明
   「校验打的是对话端点」。
@@ -132,9 +147,9 @@
   集合真变才广播）—— 与其余 13 个 provider 的「首个成功即永久缓存」有意不同。
   ⚠️ 比较目录时**必须连 `free` 标记一起比**：平台把模型从收费改成免费时 id 一字未变，
   只比 id 就永远刷不出「（免费）」角标。
-- 🧪 **门禁与测试**：新增 4 个测试文件（`keyed.spec` 27 例、`keyed-auth.spec` 27 例、
-  `keyed-adapter.spec` 21 例、`keyed-rpc-dispatch.spec` 30 例），替换掉 3 个 BYOK 用例文件；
-  全量 **2728 个单元测试通过**；provider 三方等集推进到 **15/15/15**。
+- 🧪 **门禁与测试**：新增 4 个测试文件（`keyed.spec` 33 例、`keyed-auth.spec` 29 例、
+  `keyed-adapter.spec` 21 例、`keyed-rpc-dispatch.spec` 31 例），替换掉 3 个 BYOK 用例文件；
+  全量 **2734 个单元测试通过**；provider 三方等集推进到 **15/15/15**。
 - ♻️ **`account.refresh` 不再为本族逐 id 写 `case`**：改为在 `default:` 里查
   `keyed` Map —— 以后再加平台不必动那个 switch（逐个 `case` 漏写正是历史缺陷的成因：
   `buddy-intl` / `workbuddy-cn` / `byok` 都因此让「刷新」按钮坏过）。
@@ -402,8 +417,8 @@
 | **CodeBuddy (国内版)** | 腾讯云 CodeBuddy | 微信扫码 / 手机验证码 / 腾讯 OAuth | `deepseek-v3`、`deepseek-r1`、`glm-5.3`、`glm-4-plus`、`kimi-k3`、`hunyuan-standard` 等 14 款精选模型 |
 | **CodeBuddy (国际版)** | CodeBuddy AI Global | 国际版 GitHub / Google / Email 登录 | 国际版全系模型支持 |
 | **WorkBuddy (国内/国际)**| 腾讯 WorkBuddy 生态 | 微信扫码 / 企业微信 / 国际版 OAuth | `GPT-6-Astra`、`GPT-5.6-Sol`、`GPT-5.6-Terra`、`GPT-5.5`、`Gemini-3.5-Flash`、`GLM-5.3` 等 20 款生态模型 |
-| **Command Code** | `commandcode.ai` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 75 个支持 `/chat/completions`（`deepseek-v4-pro`、`Kimi-K3`、`GLM-5.3`、`Qwen3.8-Max` 等） |
-| **OpenCode Zen** | `opencode.ai/zen` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 12 个带 `-free` 后缀的免费档位 |
+| **Command Code** | `commandcode.ai` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 75 个支持 `/chat/completions`；**4 个免费**（`laguna-s-2.1-free`、`ling-3.0-flash-sante:free`、`ling-3.1-flash:free`、`stealth/space-bunny-alpha`） |
+| **OpenCode Zen** | `opencode.ai/zen` | **粘贴你自己的 API Key**（无登录流程） | 实测 85 个模型，其中 27 个走 `/chat/completions`；**9 个免费**（`big-pickle`、`space-bunny-free`、`nemotron-3.5-lightning-free` 等） |
 
 ---
 
@@ -2170,12 +2185,29 @@ pnpm test:e2e:raccoon-tools  # ⚠️ 发推理：验证 **tools 被端点接受
 | `commandcode` | `https://api.commandcode.ai/provider/v1` | <https://commandcode.ai/keys> |
 | `opencode` | `https://opencode.ai/zen/v1` | <https://opencode.ai/auth> |
 
-### 「免费」只认模型 id 的名字后缀
+### 「免费」标记有两个来源
 
-| provider | 免费判据 | 例子 |
+| 来源 | 说明 |
+|---|---|
+| ① **id 名字后缀** | `-free` / `:free` / `_free` |
+| ② **平台官方文档/定价页白名单** | 有些不带后缀，只能靠文档 |
+
+⚠️ **②不可省** —— 官方免费模型确有**不带后缀**的：
+
+| provider | 模型 id | 官方依据 |
 |---|---|---|
-| `commandcode` | id 后缀 `-free` / `:free` | `poolside/laguna-s-2.1-free`、`inclusionai/ling-3.1-flash:free` |
-| `opencode` | id 后缀 `-free`（共 **12 个**） | `nemotron-3.5-lightning-free`、`space-bunny-free`、`longcat-2.5-preview-free`、`mimo-v2.6-flash-free`、`mimo-v2.5-free`、`ling-3.0-flash-fin-free`、`nemotron-3-ultra-free`、`deepseek-v4-flash-free` 等 |
+| `commandcode` | **`stealth/space-bunny-alpha`** | 定价页 `Free` 分组原文：「`stealth/space-bunny-alpha` is free. Requests on this model cost no credits…on every plan.」 |
+| `opencode` | **`big-pickle`** | 计价表 Input/Output/Cached Read 三列全标 `Free`；正文「is a stealth model that's free on OpenCode for a limited time」 |
+
+只靠后缀会**漏掉这两个真实的免费模型**，而这正是本渠道「确保会显示 免费的模型」的目的。
+
+| provider | 免费模型（走 `/chat/completions` 的） |
+|---|---|
+| `commandcode` | **4 个**：`poolside/laguna-s-2.1-free`、`inclusionai/ling-3.0-flash-sante:free`、`inclusionai/ling-3.1-flash:free`、`stealth/space-bunny-alpha`（无后缀） |
+| `opencode` | **9 个**：`big-pickle`（无后缀）、`space-bunny-free`、`longcat-2.5-preview-free`、`mimo-v2.6-flash-free`、`mimo-v2.5-free`、`ling-3.0-flash-fin-free`、`nemotron-3-ultra-free`、`nemotron-3.5-lightning-free`、`fledge-alpha-free` |
+
+⚠️ 白名单只收官方文档白纸黑字的 id，且**只补标记、不追加目录里没有的 id** ——
+凭空加一条会让用户选中一个平台根本没上架的模型、发出去 404。
 
 ⚠️ **绝不能把「实测能调通」标成免费** —— 那是**单个 Key 的权益**，不是平台公开事实。
 实测用 commandcode 的一个 Key 逐个打 `POST /chat/completions`（`max_tokens:1`）：
@@ -2190,14 +2222,49 @@ pnpm test:e2e:raccoon-tools  # ⚠️ 发推理：验证 **tools 被端点接受
 **不带后缀**。换一个账号很可能 403 —— 把它们标成「免费」会让别的用户在计费模型上
 **毫无防备**。**无后缀的准确含义是「未知」，不是「收费」。**
 
+### 🔬 更可靠的免费判据（仅 opencode 适用）
+
+`opencode` 的免费档位在**鉴权之前**就分流。不带 `Authorization` 头打
+`/chat/completions`：
+
+| 档位 | 匿名响应 |
+|---|---|
+| **免费** | `403 FreeTierError`（或直接 `200`） |
+| **付费** | `401 AuthError` |
+
+对全部 **85 个**模型跑了一遍：**71× 401 / 8× 403 FreeTierError / 4× 500 / 1× 400 / 1× 200**。
+非 401 的 14 个与「后缀 12 个 + 白名单 2 个」**完全吻合**：
+
+- 12 个 `-free` 后缀**全部**非 401（无一个漏判）；
+- `big-pickle`（白名单）→ `403 FreeTierError` ✅
+- `jev-1.13`（走 systemone）→ `500`，本就被下架。
+
+⚠️ 该判据**只在 opencode 成立**：`commandcode` 匿名时对全部 85 个一律 `401`。
+
 ### 不能用 `/chat/completions` 调的模型会被下架
 
 列出来却调不通比不列更糟：用户点了模型、发出去、拿到 400，还会以为是自己 Key 的问题。
 
-| provider | 下架 | 实测原因 |
+| provider | 下架数 | 原因 |
 |---|---|---|
-| `commandcode` | **10 个 claude**（`claude-sonnet-5-5`、`claude-sonnet-5`、`claude-opus-5`、`claude-haiku-4-5-20251001` 等） | 用 chat 调返回 `400 Model "claude-sonnet-5-5" must be called via /provider/v1/messages (Anthropic Messages shape).` |
-| `opencode` | **`jev-1.13` / `jev-1.13-free`** | 走 `/zen/v1/systemone`（另一套请求/响应形状） |
+| `commandcode` | **10 个** claude（`claude-sonnet-5-5`、`claude-opus-5`、`claude-haiku-4-5-20251001` 等） | 用 chat 调返回 `400 Model "claude-sonnet-5-5" must be called via /provider/v1/messages (Anthropic Messages shape).` |
+| `opencode` | **58 个** | 官方文档端点列显示它们走 `/responses`、`/messages`、`/models/gemini-*`、`/systemone` |
+
+`opencode` 的四类非 chat 端点：
+
+| 端点 | 模型族 | 代表 id |
+|---|---|---|
+| `/zen/v1/responses` | `gpt-*`（含 6.x）、`grok-*`、`muse-spark-*` | `gpt-5.5`、`gpt-6-astra`、`grok-4.7` |
+| `/zen/v1/messages` | `claude-*`、部分 `qwen*` | `claude-sonnet-5`、`qwen3.8-flash` |
+| `/zen/v1/models/gemini-*` | `gemini-*` | `gemini-3.8-flash` |
+| `/zen/v1/systemone` | `jev-1.13*`（仅这两个） | `jev-1.13`、`jev-1.13-free` |
+
+⚠️ 其中 `muse-spark-1.3-contributor-free` 与 `muse-spark-1.2-contributor-free`
+是**免费**模型但走 `/responses`，下架属**能力限制**，不是「不愿意显示免费模型」。
+
+⚠️ 端点归属**只能靠官方文档的端点列**：`opencode` **鉴权先于路由** ——
+用 bogus Key 探测时，连走 `systemone` 的 `jev-1.13-free` 也返回 `401 AuthError`
+而不是 `ModelError`，探针拿不到端点信息。
 
 `commandcode` 的 `/models` 会给每个模型下发 `supported_endpoints`：
 `/chat/completions` + `/responses` **66 个**、`/messages` **10 个**（全部是 claude）、

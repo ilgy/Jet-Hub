@@ -27,6 +27,7 @@ import {
   keyedCredentialRefName,
   keyedHeaders,
   keyedModelIdLooksFree,
+  markKeyedFreeModels,
   parseKeyedCredential,
   parseKeyedModelEntries,
   parseKeyedModelList,
@@ -91,8 +92,69 @@ describe('KeyedProduct 产品表', () => {
 
   it('⚠️ 探测模型必须是免费档位（每次粘贴 Key 都会跑一次）', () => {
     for (const product of ALL_KEYED_PRODUCTS) {
-      expect(keyedModelIdLooksFree(product.probe.model), `${product.id} 的探测模型不是免费档位`).toBe(true)
+      const documented = product.documentedFreeModels?.includes(product.probe.model) === true
+      expect(
+        keyedModelIdLooksFree(product.probe.model) || documented,
+        `${product.id} 的探测模型不是免费档位`,
+      ).toBe(true)
       expect(keyedModelExcluded(product, product.probe.model), `${product.id} 的探测模型被自己下架了`).toBe(false)
+    }
+  })
+
+  it('⚠️ 官方声明的免费模型不得被 own 下架规则误伤（除非确实调不通）', () => {
+    // 反过来也要守：下架一个官方标为免费的模型是**有损**的，
+    // 必须是有据可依（该模型走的是本适配器不支持的端点）。
+    // opencode 的两个 `muse-spark-*-contributor-free` 就是这种情况（走 /responses）。
+    for (const product of ALL_KEYED_PRODUCTS) {
+      for (const id of product.documentedFreeModels ?? []) {
+        expect(keyedModelExcluded(product, id), `${product.id} 把官方免费模型 ${id} 下架了`).toBe(false)
+      }
+    }
+  })
+
+  it('⚠️ commandcode 官方 4 个免费模型必须都能标出来', () => {
+    // 官方定价页 Free 分组原文列出的 4 个（见 src/keyed-product.ts 注释）。
+    const documented = [
+      'poolside/laguna-s-2.1-free',
+      'inclusionai/ling-3.0-flash-sante:free',
+      'inclusionai/ling-3.1-flash:free',
+      'stealth/space-bunny-alpha',  // ← 这个不带 free 后缀，靠 documentedFreeModels 兜住
+    ]
+    const entries = parseKeyedModelEntries({ data: documented.map(id => ({ id })) })
+    const marked = markKeyedFreeModels(entries, COMMANDCODE.documentedFreeModels)
+    for (const id of documented) {
+      expect(marked.find(e => e.id === id)?.free, `${id} 未被标为免费`).toBe(true)
+    }
+    // 前三个后缀就能命中，第四个才是白名单存在的理由。
+    expect(keyedModelIdLooksFree('stealth/space-bunny-alpha')).toBe(false)
+  })
+
+  it('⚠️ opencode 官方 Big Pickle 免费但无后缀，必须靠白名单兜住', () => {
+    expect(keyedModelIdLooksFree('big-pickle')).toBe(false)
+    expect(OPENCODE.documentedFreeModels).toContain('big-pickle')
+    const marked = markKeyedFreeModels(parseKeyedModelEntries({ data: [{ id: 'big-pickle' }] }), OPENCODE.documentedFreeModels)
+    expect(marked[0]!.free).toBe(true)
+  })
+
+  it('⚠️ opencode 下架全部非 /chat/completions 模型（文档端点列逐条）', () => {
+    // 文档端点表实测：85 个里有 58 个不在 `/chat/completions` 上
+    // （/responses、/messages、/models/gemini-*、/systemone）。
+    const excluded = OPENCODE.excludeModels ?? []
+    for (const id of [
+      'gpt-5.5', 'gpt-6-astra', 'grok-4.7', 'muse-spark-1.3',
+      'claude-sonnet-5', 'claude-opus-5', 'qwen3.8-flash', 'qwen3.5-plus',
+      'gemini-3.8-flash', 'jev-1.13', 'jev-1.13-free',
+      'muse-spark-1.3-contributor-free',
+    ]) {
+      expect(keyedModelExcluded(OPENCODE, id), `opencode 未下架 ${id}`).toBe(true)
+    }
+    // 走 chat 的免费模型必须保留。
+    for (const id of [
+      'big-pickle', 'space-bunny-free', 'longcat-2.5-preview-free',
+      'mimo-v2.6-flash-free', 'mimo-v2.5-free', 'ling-3.0-flash-fin-free',
+      'nemotron-3-ultra-free', 'nemotron-3.5-lightning-free',
+    ]) {
+      expect(keyedModelExcluded(OPENCODE, id), `opencode 误下架了 ${id}`).toBe(false)
     }
   })
 
@@ -159,6 +221,37 @@ describe('模型目录解析', () => {
     const entries = parseKeyedModelEntries({ data: [{ id: 'deepseek/deepseek-v4-pro' }] })
     expect(entries[0]!.free).toBe(false)
     expect(entries[0]!.endpoints).toEqual([])
+  })
+
+  it('⚠️ 官方文档声明的免费模型即使不带后缀也要标出来（Big Pickle 类）', () => {
+    // 实测：opencode 的计价表把 `Big Pickle` 三列全标成 Free，正文写明
+    // 「is a stealth model that's free on OpenCode for a limited time」，
+    // 但它的 id 是 `big-pickle`，**一个 free 都没有**。
+    const entries = parseKeyedModelEntries({ data: [{ id: 'big-pickle' }, { id: 'paid-model' }] })
+    const marked = markKeyedFreeModels(entries, ['big-pickle'])
+    expect(marked.find(e => e.id === 'big-pickle')?.free).toBe(true)
+    expect(marked.find(e => e.id === 'paid-model')?.free).toBe(false)
+    // 顺序不变（下拉列表顺序即平台顺序，不该被白名单打乱）。
+    expect(marked.map(e => e.id)).toEqual(['big-pickle', 'paid-model'])
+  })
+
+  it('⚠️ 白名单里但目录没下发的 id **不得**被凭空追加（那是编造条目）', () => {
+    // 两个渠道的免费模型都在 `/models` 里（实测确认），凭文档加一条会让用户
+    // 选中一个平台根本没上架的模型、发出去 404。
+    const marked = markKeyedFreeModels([{ id: 'a', free: false, endpoints: [] }], ['ghost-free'])
+    expect(marked.map(e => e.id)).toEqual(['a'])
+  })
+
+  it('白名单为空或未配置时**不动**目录（连数组实例都不该改）', () => {
+    const source = [{ id: 'a', free: false, endpoints: [] as readonly string[] }]
+    expect(markKeyedFreeModels(source, undefined)).toEqual(source)
+    expect(markKeyedFreeModels(source, [])).toEqual(source)
+  })
+
+  it('已是免费的不重复处理（幂等）', () => {
+    const marked = markKeyedFreeModels([{ id: 'x-free', free: true, endpoints: [] }], ['x-free'])
+    expect(marked).toHaveLength(1)
+    expect(marked[0]!.free).toBe(true)
   })
 
   it('远端若真报零价则自动标免费（为将来平台补上价格字段预留）', () => {

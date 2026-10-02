@@ -85,13 +85,20 @@ TRAE `trae`(国内)/`trae-intl`(国际)。两侧端点与登录态**互不相通
   ⚠️ 它们的模型目录**是自动刷新的**（TTL 5 分钟 + 账号指纹变更立即重拉 + 集合真变时
   `broadcastCatalogChanged(ctx)` 广播），与其余 13 个 provider 的「首个成功即永久缓存」
   **有意不同** —— 照抄别的适配器会把「平台上新模型 / 新贴一个 Key 都看不到」重新引进来。
-  ⚠️ 「免费」标记**只认模型 id 的名字后缀**（`-free` / `:free` / `_free`）。
+  ⚠️ 「免费」标记**有两个来源，且都不能靠「实测能调通」**：①模型 id 的名字后缀
+  （`-free` / `:free` / `_free`）；②平台官方文档/定价页白名单
+  （`KeyedProduct.documentedFreeModels`）。
+  ⚠️ **②不可省**：官方免费模型有不带后缀的（commandcode 的
+  `stealth/space-bunny-alpha`、opencode 的 `big-pickle`），只靠后缀会**漏掉真实的
+  免费模型**。白名单只收官方文档写明的 id，且**只补标记、不追加目录里没有的 id**。
   **绝不能把「实测能调通」标成免费** —— 那是**单个 Key 的权益**，不是平台公开事实
   （实测 commandcode 这个 Key 有 55 个模型能调通，其中 52 个不带 `free` 后缀，
   换一个账号很可能 403）。把它们标成免费会让别的用户在计费模型上毫无防备。
   ⚠️ 不能用 `/chat/completions` 调的模型**必须从目录里下架**
-  （commandcode 的 10 个 claude 要走 `/messages`；opencode 的 `jev-1.13` 走 `/systemone`）
-  —— 列出来却调不通比不列更糟。
+  （commandcode 的 10 个 claude 要走 `/messages`；opencode 有 **58 个**走
+  `/responses` / `/messages` / `/models/gemini-*` / `/systemone`）
+  —— 列出来却调不通比不列更糟。端点归属只能靠**官方文档的端点列**：
+  opencode **鉴权先于路由**，用 bogus Key 探测拿不到端点信息。
   ⚠️ `account.refresh` **刻意不给它们写 `case`**：放在 `default:` 里查 `keyed` Map，
   这样以后加平台不必再动那个 switch（逐个 `case` 漏写正是历史缺陷的成因）。
   详见 [keyed 分册](docs/agents/keyed.md)。

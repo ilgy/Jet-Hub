@@ -72,6 +72,23 @@ export interface KeyedProduct {
    * （用户点了模型、发出去、拿到 400，还会以为是自己 Key 的问题）。
    */
   excludeModels?: readonly string[]
+  /**
+   * **平台官方文档明确声明为免费**的模型 id。
+   *
+   * ⚠️ 与 `excludeModels` 相反：这是**补充**「id 后缀判不出免费」的缺口，
+   * 不是替代后缀规则。
+   *
+   * 为什么需要它：后缀规则（`-free` / `:free` / `_free`）**不可靠** ——
+   * 实测 commandcode 的官方定价页把 `stealth/space-bunny-alpha` 列为
+   * 「is free. Requests on this model cost no credits. on every plan」，
+   * 但它的 id **一个 free 都没有**。只靠后缀会让用户看不到这个免费模型
+   * （而「确保会显示 免费的模型」正是这个渠道的主要目的）。
+   *
+   * ⚠️ **只收官方文档 / 定价页白纸黑字写明的 id**，不收「实测能调通」——
+   * 后者是**单个 Key 的权益**，写死会让别的用户在计费模型上毫无防备。
+   * 每条都要在注释里留下依据出处，便于日后复核。
+   */
+  documentedFreeModels?: readonly string[]
   /** 面板上显示的补充说明。 */
   note?: string
 }
@@ -90,13 +107,21 @@ export interface KeyedProduct {
  *   403 共 14 个（gpt-5.x/6.x 等，账号无权）、400 共 16 个（claude 换端点 +
  *   `max_output_tokens` 参数问题）。
  *
- * ## ⚠️ 「免费」不能只看后缀 —— 但后缀是唯一可移植的信号
+ * ## ⚠️ 「免费」的信号有两个来源，后缀只是其中之一
  *
- * `[-_:]free$` 只命中 3 个 id，而实测 200 的有 55 个（deepseek / Kimi / GLM /
+ * `[-_:]free$` 只命中 **3 个** id，而实测 200 的有 55 个（deepseek / Kimi / GLM /
  * Qwen 等一大批都不带后缀）。差别在于：那 52 个「实测 200」是**这个 Key 的
  * 权益**，不是平台的公开事实 —— 另一个账号很可能 403。
- * 故本适配器**只**用后缀规则标「免费」，其余一律「未知」，绝不把某个账号的
- * 权益写死成全局标签（写死了会让别的用户在计费模型上毫无防备）。
+ * 故本适配器**绝不**把「实测能调通」写死成免费标签。
+ *
+ * 但**只靠后缀同样不够**：官方定价页
+ * （`https://commandcode.ai/docs/resources/pricing-limits`）的 `Free` 分组
+ * 明确列出 **4 个**免费模型，其中 `stealth/space-bunny-alpha` 的 id
+ * **一个 free 都不带**（页面原文：「`stealth/space-bunny-alpha` is free.
+ * Requests on this model cost no credits…on every plan.」）。
+ * 只靠后缀会让用户看不到它，而「确保会显示 免费的模型」正是本渠道的主要目的。
+ *
+ * ⇒ 判据是**两者取并**：后缀命中 **或** 官方文档白名单（`documentedFreeModels`）。
  */
 export const COMMANDCODE: KeyedProduct = Object.freeze({
   id: 'commandcode',
@@ -125,6 +150,18 @@ export const COMMANDCODE: KeyedProduct = Object.freeze({
     'claude-opus-4-7',
     'claude-haiku-4-5-20251001',
   ]),
+  // ⚠️ 官方定价页 `https://commandcode.ai/docs/resources/pricing-limits` 的
+  // `Free` 分组明确列出 4 个（页面原文逐字）：
+  //   - `laguna-s-2.1-free is free. Requests on this model cost no credits.`
+  //   - `ling-3.0-flash-sante:free is free, up to 100 requests a day.`
+  //   - `ling-3.1-flash:free is free, up to 300 requests a day.`
+  //   - `stealth/space-bunny-alpha is free. Requests on this model cost no credits.`
+  // 前三个后缀就能命中，**第四个不能** —— 只靠后缀会漏掉它。
+  // 本机实测四个都 `POST /chat/completions` → 200，且 `space-bunny-alpha`
+  // 的 `supported_endpoints` 是 `["/chat/completions"]`（本适配器支持）。
+  documentedFreeModels: Object.freeze([
+    'stealth/space-bunny-alpha',
+  ]),
   note: '在 commandcode.ai/keys 创建 API Key 后粘贴。逐个模型可用性由账号权益决定（同目录下部分模型会返回 403）。',
 })
 
@@ -146,11 +183,30 @@ export const COMMANDCODE: KeyedProduct = Object.freeze({
  *   （`x-opencode-client` / `x-opencode-version` / `x-zen-client`）**都无法**
  *   绕过匿名态的 FreeTierError —— 故本适配器不伪造任何客户端标识头。
  *
- * ## 12 个 `-free` 模型里有 1 个不能用
+ * ## ⚠️ 免费模型里有一个「不带 -free 后缀」的
  *
- * `jev-1.13-free` 走的是 `/zen/v1/systemone`（另一套请求/响应形状），
- * 官方文档表格明确标注；走 `/chat/completions` 会被拒。故下架
- * `jev-1.13` 与 `jev-1.13-free` 两个 id（`/systemone` 只有这两个模型在用）。
+ * 官方文档的计价表把 `Big Pickle` 的 Input/Output/Cached Read 三列全标成
+ * **`Free`**，正文也写明「`Big Pickle` is a stealth model that's free on OpenCode
+ * for a limited time」—— 但它的 id 是 `big-pickle`，**一个 free 都没有**。
+ * 只靠后缀会让用户看不到它。故用 `documentedFreeModels` 补上。
+ *
+ * ## ⚠️ 大量模型**不走** `/chat/completions`
+ *
+ * 官方文档的端点列给出每个模型的真实端点，实测线上 85 个里有 **58 个**
+ * 不在本适配器支持的 `/chat/completions` 上：
+ *
+ * | 端点 | 模型族 |
+ * |---|---|
+ * | `/zen/v1/responses` | `gpt-*`（含 6.x）、`grok-*`、`muse-spark-*` |
+ * | `/zen/v1/messages` | `claude-*`、`qwen3.x-plus`、`qwen3.8-flash` |
+ * | `/zen/v1/models/gemini-*` | `gemini-*` |
+ * | `/zen/v1/systemone` | `jev-1.13*` |
+ *
+ * 列出来却调不通比不列更糟（用户点了模型、发出去、拿到 400，还会以为是自己
+ * Key 的问题），故全部下架 —— 见 `excludeModels`。
+ *
+ * ⚠️ 注意 `muse-spark-1.2-contributor-free` / `muse-spark-1.3-contributor-free`
+ * 虽是**免费**模型，但走 `/responses`，本适配器用不了，同样下架。
  */
 export const OPENCODE: KeyedProduct = Object.freeze({
   id: 'opencode',
@@ -160,13 +216,90 @@ export const OPENCODE: KeyedProduct = Object.freeze({
   consoleUrl: 'https://opencode.ai/auth',
   docsUrl: 'https://opencode.ai/docs/zen/',
   probe: {
-    // 官方文档表格里标注为 Free 的模型（`... | nemotron-3.5-lightning-free | /chat/completions`）。
+    // 官方文档表格里标注为 Free 且走 `/chat/completions` 的模型。
     model: 'nemotron-3.5-lightning-free',
-    // ⚠️ 必须连报文一起判：`space-bunny-free` 也能返回 401，但那是 ModelError
-    // （「这个模型不支持 systemone 格式」），与 Key 有效性无关。
+    // ⚠️ 必须连报文一起判：无效 Key 是 `AuthError`，而「模型不该走这条协议」
+    // 是 `ModelError` —— 两者可能都是 401，只看状态码会误判。
+    //
+    // ⚠️ 实测补充（重要）：**鉴权发生在路由之前**。用 bogus Key 打
+    // `/chat/completions` 时，连 `jev-1.13-free`（走 systemone）也返回
+    // `401 AuthError` 而不是 `ModelError` —— 故这条报文判据只在**真 Key**
+    // 打到错协议时才会生效。端点归属因此只能靠官方文档表格，不能靠探针。
     invalidIf: (status: number, body: string) => status === 401 && body.includes('AuthError'),
   },
-  excludeModels: Object.freeze(['jev-1.13', 'jev-1.13-free']),
+  excludeModels: Object.freeze([
+    // `/zen/v1/messages`（Anthropic Messages 形状）
+    'claude-fable-5',
+    'claude-fable-5-1',
+    'claude-haiku-4-5',
+    'claude-opus-4-5',
+    'claude-opus-4-6',
+    'claude-opus-4-7',
+    'claude-opus-4-8',
+    'claude-opus-5',
+    'claude-opus-5-5',
+    'claude-sonnet-4-5',
+    'claude-sonnet-4-6',
+    'claude-sonnet-5',
+    // ⚠️ 下面两个**文档表格里没有**（线上目录比文档多 5 个 id 中的 2 个）。
+    // 按同族推断走 `/messages`，采取保守下架（宁可少列，不让用户撞 400）。
+    'claude-sonnet-4',
+    'claude-sonnet-5-5',
+    // `/zen/v1/messages`
+    'qwen3.5-plus',
+    'qwen3.6-plus',
+    'qwen3.8-flash',
+    // `/zen/v1/models/gemini-*`（Google 原生形状）
+    'gemini-3-flash',
+    'gemini-3.1-pro',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.7-flash',
+    'gemini-3.8-flash',
+    // `/zen/v1/responses`
+    'gpt-5',
+    'gpt-5-codex',
+    'gpt-5-nano',
+    'gpt-5.1',
+    'gpt-5.1-codex',
+    'gpt-5.1-codex-max',
+    'gpt-5.1-codex-mini',
+    'gpt-5.2',
+    'gpt-5.2-codex',
+    'gpt-5.3-codex',
+    'gpt-5.3-codex-spark',
+    'gpt-5.4',
+    'gpt-5.4-mini',
+    'gpt-5.4-nano',
+    'gpt-5.4-pro',
+    'gpt-5.5',
+    'gpt-5.5-pro',
+    'gpt-5.6-luna',
+    'gpt-5.6-sol',
+    'gpt-5.6-terra',
+    'gpt-6-astra',
+    'gpt-6-luna',
+    'gpt-6-sol',
+    'gpt-6.1-sol',
+    'grok-4.5',
+    'grok-4.6',
+    'grok-4.7',
+    'grok-build-0.1',
+    'muse-spark-1.2',
+    'muse-spark-1.3',
+    // ⚠️ 这两个是**免费**模型（`-free` 后缀），但走 `/responses`，
+    // 本适配器用不了 —— 下架是无奈之举，不是「不愿意显示免费模型」。
+    'muse-spark-1.2-contributor-free',
+    'muse-spark-1.3-contributor-free',
+    // `/zen/v1/systemone`（另一套请求/响应形状，`/systemone` 只有这两个模型在用）
+    'jev-1.13',
+    'jev-1.13-free',
+  ]),
+  // ⚠️ 官方文档的计价表把 `Big Pickle` 三列全标成 `Free`，正文写明
+  // 「is a stealth model that's free on OpenCode for a limited time」，
+  // 但它的 id **不带任何 free 后缀** —— 只靠后缀会漏掉它。
+  documentedFreeModels: Object.freeze(['big-pickle']),
   note: '在 opencode.ai/auth 登录后创建 API Key 再粘贴。带 -free 后缀的模型免额度，其余按 Zen 余额计费。',
 })
 

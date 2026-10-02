@@ -25,6 +25,7 @@ import { errorDetail } from './http-error.js'
 import {
   buildKeyedCredential,
   keyedApiKeyLooksMalformed,
+  markKeyedFreeModels,
   parseKeyedCredential,
   parseKeyedModelEntries,
 } from './keyed.js'
@@ -121,12 +122,13 @@ export async function loadKeyedModels(
   }
   const entries = parseKeyedModelEntries(parsed)
   const warnings: string[] = []
-  const models = entries.filter(entry => {
+  const kept = entries.filter(entry => {
     if (!keyedModelExcluded(product, entry.id)) return true
     warnings.push(`模型 ${entry.id} 不接受 /chat/completions（该产品要求另一套协议形状），已从目录里隐藏`)
     return false
   })
-  return { models, warnings }
+  // ⚠️ 补官方文档声明的免费模型（有些不带 free 后缀，后缀规则会漏掉）。
+  return { models: markKeyedFreeModels(kept, product.documentedFreeModels), warnings }
 }
 
 /** 导入 `KeyedModelEntry` 供外部使用。 */
